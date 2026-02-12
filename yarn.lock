@@ -965,56 +965,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hydra/hydra-stake-api@workspace:*, @hydra/hydra-stake-api@workspace:packages/api":
-  version: 0.0.0-use.local
-  resolution: "@hydra/hydra-stake-api@workspace:packages/api"
-  dependencies:
-    "@hydra/hydra-stake-protocol": "workspace:*"
-    "@types/ws": "npm:^8.5.9"
-    allure-commandline: "npm:^2.28.0"
-    allure-jest: "npm:^2.15.1"
-    allure-js-commons: "npm:^2.15.1"
-    eslint: "npm:^8.52.0"
-    jest: "npm:^29.7.0"
-    pino: "npm:^8.16.1"
-    typescript: "npm:^5.8.3"
-    uuid: "npm:^11.1.0"
-    ws: "npm:8.17.1"
-  languageName: unknown
-  linkType: soft
-
-"@hydra/hydra-stake-cli@workspace:packages/cli":
-  version: 0.0.0-use.local
-  resolution: "@hydra/hydra-stake-cli@workspace:packages/cli"
-  dependencies:
-    "@hydra/hydra-stake-api": "workspace:*"
-    "@hydra/hydra-stake-protocol": "workspace:*"
-    "@types/jest": "npm:^29.5.12"
-    "@types/ws": "npm:^8.5.9"
-    allure-commandline: "npm:^2.32.0"
-    allure-jest: "npm:^3.0.5"
-    allure-js-commons: "npm:^3.0.5"
-    eslint: "npm:^8.52.0"
-    jest: "npm:^29.7.0"
-    pino: "npm:^8.16.1"
-    ts-jest: "npm:^29.1.2"
-    typescript: "npm:^5.2.2"
-    ws: "npm:^8.14.2"
-  languageName: unknown
-  linkType: soft
-
-"@hydra/hydra-stake-protocol@workspace:*, @hydra/hydra-stake-protocol@workspace:packages/contract":
-  version: 0.0.0-use.local
-  resolution: "@hydra/hydra-stake-protocol@workspace:packages/contract"
-  dependencies:
-    axios: "npm:^1.13.2"
-    eslint: "npm:^9.27.0"
-    jest: "npm:^29.7.0"
-    typescript: "npm:^5.8.2"
-    vitest: "npm:^4.0.1"
-  languageName: unknown
-  linkType: soft
-
 "@isaacs/balanced-match@npm:^4.0.1":
   version: 4.0.1
   resolution: "@isaacs/balanced-match@npm:4.0.1"
@@ -3982,13 +3932,61 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@repo/hydra-stake-api@workspace:*, @repo/hydra-stake-api@workspace:packages/api":
+  version: 0.0.0-use.local
+  resolution: "@repo/hydra-stake-api@workspace:packages/api"
+  dependencies:
+    "@repo/hydra-stake-protocol": "workspace:*"
+    "@types/ws": "npm:^8.5.9"
+    allure-commandline: "npm:^2.28.0"
+    allure-jest: "npm:^2.15.1"
+    allure-js-commons: "npm:^2.15.1"
+    eslint: "npm:^8.52.0"
+    jest: "npm:^29.7.0"
+    pino: "npm:^8.16.1"
+    typescript: "npm:^5.8.3"
+    uuid: "npm:^11.1.0"
+    ws: "npm:8.17.1"
+  languageName: unknown
+  linkType: soft
+
+"@repo/hydra-stake-cli@workspace:packages/cli":
+  version: 0.0.0-use.local
+  resolution: "@repo/hydra-stake-cli@workspace:packages/cli"
+  dependencies:
+    "@repo/hydra-stake-api": "workspace:*"
+    "@repo/hydra-stake-protocol": "workspace:*"
+    "@types/jest": "npm:^29.5.12"
+    "@types/ws": "npm:^8.5.9"
+    allure-commandline: "npm:^2.32.0"
+    allure-jest: "npm:^3.0.5"
+    allure-js-commons: "npm:^3.0.5"
+    eslint: "npm:^8.52.0"
+    jest: "npm:^29.7.0"
+    pino: "npm:^8.16.1"
+    ts-jest: "npm:^29.1.2"
+    typescript: "npm:^5.2.2"
+    ws: "npm:^8.14.2"
+  languageName: unknown
+  linkType: soft
+
+"@repo/hydra-stake-protocol@workspace:*, @repo/hydra-stake-protocol@workspace:packages/contract":
+  version: 0.0.0-use.local
+  resolution: "@repo/hydra-stake-protocol@workspace:packages/contract"
+  dependencies:
+    axios: "npm:^1.13.2"
+    eslint: "npm:^9.27.0"
+    jest: "npm:^29.7.0"
+    typescript: "npm:^5.8.2"
+    vitest: "npm:^4.0.1"
+  languageName: unknown
+  linkType: soft
+
 "@repo/liquid-staking-protocol-ui@workspace:packages/ui":
   version: 0.0.0-use.local
   resolution: "@repo/liquid-staking-protocol-ui@workspace:packages/ui"
   dependencies:
     "@eslint/js": "npm:^9.33.0"
-    "@hydra/hydra-stake-api": "workspace:*"
-    "@hydra/hydra-stake-protocol": "workspace:*"
     "@originjs/vite-plugin-commonjs": "npm:^1.0.3"
     "@radix-ui/react-accordion": "npm:1.2.2"
     "@radix-ui/react-alert-dialog": "npm:1.1.4"
@@ -4017,6 +4015,8 @@ __metadata:
     "@radix-ui/react-toggle": "npm:1.1.1"
     "@radix-ui/react-toggle-group": "npm:1.1.1"
     "@radix-ui/react-tooltip": "npm:1.1.6"
+    "@repo/hydra-stake-api": "workspace:*"
+    "@repo/hydra-stake-protocol": "workspace:*"
     "@tailwindcss/postcss": "npm:^4.1.12"
     "@tailwindcss/vite": "npm:^4.1.16"
     "@types/node": "npm:^24.3.0"
@@ -12461,11 +12461,11 @@ __metadata:
   linkType: hard
 
 "qs@npm:^6.12.3, qs@npm:^6.4.0":
-  version: 6.14.1
-  resolution: "qs@npm:6.14.1"
+  version: 6.14.2
+  resolution: "qs@npm:6.14.2"
   dependencies:
     side-channel: "npm:^1.1.0"
-  checksum: 10c0/0e3b22dc451f48ce5940cbbc7c7d9068d895074f8c969c0801ac15c1313d1859c4d738e46dc4da2f498f41a9ffd8c201bd9fb12df67799b827db94cc373d2613
+  checksum: 10c0/646110124476fc9acf3c80994c8c3a0600cbad06a4ede1c9e93341006e8426d64e85e048baf8f0c4995f0f1bf0f37d1f3acc5ec1455850b81978792969a60ef6
   languageName: node
   linkType: hard
 
@@ -14191,58 +14191,58 @@ __metadata:
   languageName: node
   linkType: hard
 
-"turbo-darwin-64@npm:2.8.5":
-  version: 2.8.5
-  resolution: "turbo-darwin-64@npm:2.8.5"
+"turbo-darwin-64@npm:2.8.7":
+  version: 2.8.7
+  resolution: "turbo-darwin-64@npm:2.8.7"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"turbo-darwin-arm64@npm:2.8.5":
-  version: 2.8.5
-  resolution: "turbo-darwin-arm64@npm:2.8.5"
+"turbo-darwin-arm64@npm:2.8.7":
+  version: 2.8.7
+  resolution: "turbo-darwin-arm64@npm:2.8.7"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"turbo-linux-64@npm:2.8.5":
-  version: 2.8.5
-  resolution: "turbo-linux-64@npm:2.8.5"
+"turbo-linux-64@npm:2.8.7":
+  version: 2.8.7
+  resolution: "turbo-linux-64@npm:2.8.7"
   conditions: os=linux & cpu=x64
   languageName: node
   linkType: hard
 
-"turbo-linux-arm64@npm:2.8.5":
-  version: 2.8.5
-  resolution: "turbo-linux-arm64@npm:2.8.5"
+"turbo-linux-arm64@npm:2.8.7":
+  version: 2.8.7
+  resolution: "turbo-linux-arm64@npm:2.8.7"
   conditions: os=linux & cpu=arm64
   languageName: node
   linkType: hard
 
-"turbo-windows-64@npm:2.8.5":
-  version: 2.8.5
-  resolution: "turbo-windows-64@npm:2.8.5"
+"turbo-windows-64@npm:2.8.7":
+  version: 2.8.7
+  resolution: "turbo-windows-64@npm:2.8.7"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
-"turbo-windows-arm64@npm:2.8.5":
-  version: 2.8.5
-  resolution: "turbo-windows-arm64@npm:2.8.5"
+"turbo-windows-arm64@npm:2.8.7":
+  version: 2.8.7
+  resolution: "turbo-windows-arm64@npm:2.8.7"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
 "turbo@npm:^2.5.8":
-  version: 2.8.5
-  resolution: "turbo@npm:2.8.5"
+  version: 2.8.7
+  resolution: "turbo@npm:2.8.7"
   dependencies:
-    turbo-darwin-64: "npm:2.8.5"
-    turbo-darwin-arm64: "npm:2.8.5"
-    turbo-linux-64: "npm:2.8.5"
-    turbo-linux-arm64: "npm:2.8.5"
-    turbo-windows-64: "npm:2.8.5"
-    turbo-windows-arm64: "npm:2.8.5"
+    turbo-darwin-64: "npm:2.8.7"
+    turbo-darwin-arm64: "npm:2.8.7"
+    turbo-linux-64: "npm:2.8.7"
+    turbo-linux-arm64: "npm:2.8.7"
+    turbo-windows-64: "npm:2.8.7"
+    turbo-windows-arm64: "npm:2.8.7"
   dependenciesMeta:
     turbo-darwin-64:
       optional: true
@@ -14258,7 +14258,7 @@ __metadata:
       optional: true
   bin:
     turbo: bin/turbo
-  checksum: 10c0/6eaae92af681da416d29943da65c2a8b38eaf314d2125d134cd548fb832c5191ccdfc66e56fb272cc173a28dfc6674f0c0666d823366d505ae3f26b64d821173
+  checksum: 10c0/2abd178689c7a72d3c2ddd8f5ad53a0bcacc84583361b8d13bb637ebbf738c8872c1c88d65ad1591bd59644cab8d9a477c9fbcee1a4cd63a9072b3943afe5ac9
   languageName: node
   linkType: hard
 

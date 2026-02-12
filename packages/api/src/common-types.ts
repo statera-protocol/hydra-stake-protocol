@@ -5,7 +5,7 @@ import {
   Stake,
   QualifiedCoinInfo,
   StakePoolStatus,
-} from "@hydra/hydra-stake-protocol";
+} from "@repo/hydra-stake-protocol";
 import { MidnightProviders } from "@midnight-ntwrk/midnight-js-types";
 import { type FoundContract } from "@midnight-ntwrk/midnight-js-contracts";
 
@@ -28,7 +28,8 @@ export type HydraStakeContractProviders = MidnightProviders<
 >;
 export type DeployedHydraStakeOnchainContract =
   FoundContract<HydraStakeContract>;
-export type DerivedHydraStakeContractState = {
+
+  export type DerivedHydraStakeContractState = {
   totalMint: bigint;
   protocolTVL: QualifiedCoinInfo;
   mintTokenColor: string;

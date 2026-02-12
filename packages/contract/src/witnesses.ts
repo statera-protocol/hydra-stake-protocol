@@ -37,7 +37,7 @@ export const createHydraStakePrivateState = (
 ): HydraStakePrivateState => ({
   secretKey,
   stakeMetadata: {
-    deposit_amount: 0n,
+    deposit_amount: 0n, 
     stAssets_minted: 0n,
     redeemable: 0n,
   },

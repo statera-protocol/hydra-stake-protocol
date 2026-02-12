@@ -1,25 +1,24 @@
 {
-  "name": "@hydra/hydra-stake-cli",
+  "name": "@repo/hydra-stake-cli",
   "version": "1.0.0",
   "main": "index.js",
   "license": "MIT",
   "type": "module",
   "packageManager": "yarn@4.9.2",
   "scripts": {
-    "testnet-remote": "node --loader ts-node/esm --experimental-specifier-resolution=node dist/launcher/testnet-remote.js",
-    "testnet-remote-ps": "node --experimental-specifier-resolution=node dist/launcher/testnet-remote-start-proof-server.js",
-    "testnet-local": "node --experimental-specifier-resolution=node dist/launcher/testnet-local.js",
-    "standalone": "node --experimental-specifier-resolution=node dist/launcher/standalone.js",
-    "prepack": "yarn build",
-    "test": "yarn test-e2e",
-    "test-e2e": "NODE_OPTIONS=--experimental-vm-modules jest  --detectOpenHandles --forceExit",
+    "standalone": "docker compose -f standalone.yml pull && node --experimental-specifier-resolution=node --loader ts-node/esm src/standalone.ts",
+    "test-api": "docker compose -f standalone.yml pull && DEBUG='testcontainers' vitest run",
     "build": "rm -rf dist && tsc --project tsconfig.build.json",
-    "prebuild": "rm -rf dist && tsc --project tsconfig.build.json",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "preview": "node --experimental-specifier-resolution=node --loader ts-node/esm src/preview.ts",
+    "preview-ps": "docker compose -f proof-server.yml pull && node --experimental-specifier-resolution=node --loader ts-node/esm src/preview-start-proof-server.ts",
+    "preprod": "node --experimental-specifier-resolution=node --loader ts-node/esm src/preprod.ts",
+    "preprod-ps": "docker compose -f proof-server.yml pull && node --experimental-specifier-resolution=node --loader ts-node/esm src/preprod-start-proof-server.ts"
   },
   "dependencies": {
-    "@hydra/hydra-stake-api": "workspace:*",
-    "@hydra/hydra-stake-protocol": "workspace:*",
+    "@repo/hydra-stake-api": "workspace:*",
+    "@repo/hydra-stake-protocol": "workspace:*",
     "pino": "^8.16.1",
     "ws": "^8.14.2"
   },
