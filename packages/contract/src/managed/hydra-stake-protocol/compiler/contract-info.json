@@ -64,7 +64,7 @@
           "name": "stakeCoin",
           "type": {
             "type-name": "Struct",
-            "name": "CoinInfo",
+            "name": "ShieldedCoinInfo",
             "elements": [
               {
                 "name": "nonce",
@@ -105,7 +105,7 @@
           "name": "mintedCoin",
           "type": {
             "type-name": "Struct",
-            "name": "CoinInfo",
+            "name": "ShieldedCoinInfo",
             "elements": [
               {
                 "name": "nonce",
@@ -146,7 +146,7 @@
           "name": "coin",
           "type": {
             "type-name": "Struct",
-            "name": "CoinInfo",
+            "name": "ShieldedCoinInfo",
             "elements": [
               {
                 "name": "nonce",

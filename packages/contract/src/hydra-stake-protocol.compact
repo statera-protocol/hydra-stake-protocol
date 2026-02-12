@@ -1,4 +1,4 @@
-pragma language_version >= 0.17.0;
+pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
 import GlobalStatesAndWitnesses;
@@ -8,15 +8,15 @@ import Admin;
 export {
      protocolTVL, total_rewards_accrued, total_stake_withdrawn, total_stAsset_Minted,
      validAssetCoinType, StakePrivateState, Stake, StakeStatus, stakings,
-     QualifiedCoinInfo, CoinInfo, SCALE_FACTOR, admins, stakePoolStatus, 
+     ShieldedCoinInfo, SCALE_FACTOR, admins, stakePoolStatus, 
      StakePoolStatus, stAssetCoinColor, delegate, setTokenColor, removeNewAdmin, 
      addNewAdmin, stAssetDomainSeparator, delegationContractAddress, superAdmin
 };
 
 /** Initialize the contract with admin specified parameters */
 constructor(
-     initialNonce: Bytes<32>, 
-     initValidAssetCoinType: Bytes<32>, 
+     initialNonce: Bytes<32>,
+     initValidAssetCoinType: Bytes<32>,
      initMintDomain: Bytes<32>,
      initDelegationContractAddress: Bytes<32>,
      initScaleFactor: Uint<32>
@@ -31,12 +31,12 @@ constructor(
 }
 
 /** STAKER FUNCTIONALITIES */
-export circuit stake(stakeCoin: CoinInfo): []{
+export circuit stake(stakeCoin: ShieldedCoinInfo): []{
      const disclosedCoin = disclose(stakeCoin);
      const userPk = ownPublicKey().bytes;
      const stakerId = generateStakerId(disclose(secrete_key()));
      assert (disclosedCoin.value > 0, "Insufficient Funds provide for staking");
-     /** Mint token to the user */ 
+/** Mint token to the user */ 
      const amountMintable = calculateMintCapacity(disclosedCoin.value);
      mintNewToken(amountMintable);
      /** Handle funds sent to contract */
@@ -85,7 +85,7 @@ export circuit stake(stakeCoin: CoinInfo): []{
      }
 }
 
-export circuit redeem(mintedCoin: CoinInfo): []{
+export circuit redeem(mintedCoin: ShieldedCoinInfo): []{
      /** Ensure that protocolTVL plus delegation reward is available for redemption */
      assert (stakePoolStatus == StakePoolStatus.available, "Delegation has already proceeded");
      const disclosedCoin = disclose(mintedCoin);
@@ -133,7 +133,7 @@ export circuit redeem(mintedCoin: CoinInfo): []{
 
 
 /** DELEGATOR FUNCTIONALITIES */
-export circuit recieveDelegateReward(coin: CoinInfo): []{
+export circuit recieveDelegateReward(coin: ShieldedCoinInfo): []{
      const disclosedCoin = disclose(coin);
      /** Recieve coin deposit from the third party contract */
      recieveAndAddCoinToTvl(disclosedCoin);

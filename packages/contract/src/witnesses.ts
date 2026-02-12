@@ -1,7 +1,7 @@
 import {
   Ledger,
   StakePrivateState,
-} from "./managed/hydra-stake-protocol/contract/index.cjs";
+} from "./managed/hydra-stake-protocol/contract/index.js";
 import { WitnessContext } from "@midnight-ntwrk/compact-runtime";
 import axios from "axios";
 
@@ -66,9 +66,9 @@ export const witnesses = {
   get_stake_private_state: ({
     privateState,
   }: WitnessContext<Ledger, HydraStakePrivateState>): [
-      HydraStakePrivateState,
-      StakePrivateState,
-    ] => {
+    HydraStakePrivateState,
+    StakePrivateState,
+  ] => {
     return [privateState, privateState.stakeMetadata];
   },
 
@@ -89,9 +89,9 @@ export const witnesses = {
   get_current_time: ({
     privateState,
   }: WitnessContext<Ledger, HydraStakePrivateState>): [
-      HydraStakePrivateState,
-      bigint,
-    ] => {
+    HydraStakePrivateState,
+    bigint,
+  ] => {
     return [privateState, BigInt(Date.now())];
   },
 
@@ -102,13 +102,14 @@ export const witnesses = {
   call_backend_for_delegation: (
     { privateState }: WitnessContext<Ledger, HydraStakePrivateState>,
     delegate_amount: bigint,
-    contractAddress: Uint8Array,
+    contractAddress: Uint8Array
   ): [HydraStakePrivateState, boolean] => {
     try {
-      axios.post("http://localhost:8000/", {
-        pool_stake_amount: Number(delegate_amount),
-        contractAddress: contractAddress
-      })
+      axios
+        .post("http://localhost:8000/", {
+          pool_stake_amount: Number(delegate_amount),
+          contractAddress: contractAddress,
+        })
         .then((apiResponse) => apiResponse.status == 200)
         .catch((error) => {
           // const errMsg = error instanceof Error ? error.message : String(error);

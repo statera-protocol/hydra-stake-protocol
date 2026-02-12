@@ -5,7 +5,7 @@ module Utils {
     export circuit mintNewToken(amount: Uint<64>):[] {
         const newTokenNonce = evolveNonce(mintCounter, nonce);
 
-        mintToken(
+        mintShieldedToken(
             stAssetDomainSeparator,
             amount,
             newTokenNonce,
@@ -57,8 +57,8 @@ module Utils {
         ]);
     }
 
-    export circuit recieveAndAddCoinToTvl(disclosedCoin: CoinInfo): []{
-        receive(disclosedCoin);
+    export circuit recieveAndAddCoinToTvl(disclosedCoin: ShieldedCoinInfo): []{
+        receiveShielded(disclosedCoin);
 
         /** Update the ledger balance */
         const coinToInsert = protocolTVL.value > 0 ? 
@@ -71,19 +71,19 @@ module Utils {
         );
     }
 
-    export circuit burnReturnedstAsset(coin: CoinInfo):[] {
+    export circuit burnReturnedstAsset(coin: ShieldedCoinInfo):[] {
         const disclosedCoin = disclose(coin);
         assert (disclosedCoin.color == stAssetCoinColor, "Invalid coin type provided to cover transaction");
         
-        receive(disclosedCoin);
+        receiveShielded(disclosedCoin);
         /** Immediately burn */
-        sendImmediate(coin, burnAddress(), disclosedCoin.value);
+        sendImmediateShielded(coin, shieldedBurnAddress(), disclosedCoin.value);
     }
 
     export circuit sendAndManageChange(amount: Uint<128>, address: ZswapCoinPublicKey): []{
         const disclosedAmt = disclose(amount);
         /** Update the ledger balance */
-        const sendResult = send(protocolTVL, left<ZswapCoinPublicKey, ContractAddress>(address), disclosedAmt);
+        const sendResult = sendShielded(protocolTVL, left<ZswapCoinPublicKey, ContractAddress>(address), disclosedAmt);
         if(sendResult.change.is_some){
             protocolTVL.writeCoin(
                 sendResult.change.value,
@@ -93,4 +93,8 @@ module Utils {
             protocolTVL.resetToDefault();
         }
     }
+
+    export circuit calculateVestedAmount(x: Field): Uint<64> {
+        return 0;
+    }    
 }

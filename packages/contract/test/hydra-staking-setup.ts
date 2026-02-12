@@ -1,43 +1,39 @@
 import {
-  CircuitContext,
+  type CircuitContext,
   CircuitResults,
-  constructorContext,
-  QueryContext,
+  sampleContractAddress,
+  createConstructorContext,
+  createCircuitContext,
+  dummyContractAddress,
 } from "@midnight-ntwrk/compact-runtime";
 import {
-  CoinInfo,
+  ShieldedCoinInfo,
   Contract,
   ledger,
-  Ledger,
-  Witnesses,
-} from "../src/managed/hydra-stake-protocol/contract/index.cjs";
+  type Ledger,
+} from "../src/managed/hydra-stake-protocol/contract/index.js";
 import {
-  HydraStakePrivateState,
+  type HydraStakePrivateState,
   createHydraStakePrivateState,
   witnesses,
 } from "../src/witnesses";
 import {
   encodeContractAddress,
-  encodeTokenType,
+  unshieldedToken,
+  encodeRawTokenType,
   nativeToken,
-  sampleContractAddress,
-  tokenType,
-} from "@midnight-ntwrk/ledger";
+  rawTokenType
+} from "@midnight-ntwrk/ledger-v7";
 import { pad, randomBytes } from "./utils";
 
-export type HydraStakeContract = Contract<
-  HydraStakePrivateState,
-  Witnesses<HydraStakePrivateState>
->;
-
 export class HydraStakeSimulator {
-  readonly contract: HydraStakeContract;
+  readonly contract: Contract<HydraStakePrivateState>;
   turnContext: CircuitContext<HydraStakePrivateState>;
   updateUserPrivateState: (newPrivateState: HydraStakePrivateState) => void;
   readonly SCALE_FACTOR: number;
   readonly contractAddress: string;
   readonly delegationContractAddress =
-    "0200df7d34b0d9843ac09e18d412640a8214836c9dec943e708fde38ee2c3113975f";
+    sampleContractAddress()
 
   constructor(privateState: HydraStakePrivateState) {
     this.contract = new Contract(witnesses);
@@ -46,26 +42,23 @@ export class HydraStakeSimulator {
       currentPrivateState,
       currentZswapLocalState,
     } = this.contract.initialState(
-      constructorContext(privateState, "0".repeat(64)),
+      createConstructorContext(privateState, "0".repeat(64)),
       randomBytes(32),
-      encodeTokenType(nativeToken()),
+      encodeRawTokenType(nativeToken().raw),
       pad("hydra:htDUST", 32),
       encodeContractAddress(this.delegationContractAddress), // Dummy testnet third party delegation wallet address
       BigInt(1_000_000)
     );
-    this.contractAddress = sampleContractAddress();
+    this.contractAddress = dummyContractAddress();
     this.updateUserPrivateState = (
       newPrivateState: HydraStakePrivateState
     ) => {};
-    this.turnContext = {
-      currentPrivateState,
+    this.turnContext = createCircuitContext(
+      sampleContractAddress(),
       currentZswapLocalState,
-      originalState: currentContractState,
-      transactionContext: new QueryContext(
-        currentContractState.data,
-        this.contractAddress
-      ),
-    };
+      currentContractState,
+      currentPrivateState,
+    )
 
     this.SCALE_FACTOR = 1_000_000;
   }
@@ -87,7 +80,7 @@ export class HydraStakeSimulator {
   }
 
   getLedgerState(): Ledger {
-    return ledger(this.turnContext.transactionContext.state);
+    return ledger(this.turnContext.currentQueryContext.state);
   }
 
   getPrivateState(): HydraStakePrivateState {
@@ -102,18 +95,18 @@ export class HydraStakeSimulator {
     return this.getLedgerState();
   }
 
-  coin(amount: number): CoinInfo {
+  coin(amount: number): ShieldedCoinInfo {
     return {
-      color: encodeTokenType(nativeToken()),
+      color: encodeRawTokenType(nativeToken().raw),
       nonce: randomBytes(32),
       value: BigInt(amount),
     };
   }
 
-  stCoin(amount: number): CoinInfo {
+  stCoin(amount: number): ShieldedCoinInfo {
     return {
-      color: encodeTokenType(
-        tokenType(pad("hydra:htDUST", 32), this.contractAddress)
+      color: encodeRawTokenType(
+        rawTokenType(pad("hydra:htDUST", 32), this.contractAddress)
       ),
       nonce: randomBytes(32),
       value: BigInt(amount),

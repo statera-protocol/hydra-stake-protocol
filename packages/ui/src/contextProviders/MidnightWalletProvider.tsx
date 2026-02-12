@@ -23,7 +23,7 @@ import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-pri
 import {
   createBalancedTx,
   ZKConfigProvider,
-  type BalancedTransaction,
+  type BalancedProvingRecipe,
   type MidnightProvider,
   type PrivateStateProvider,
   type ProofProvider,
@@ -150,21 +150,21 @@ const MidnightWalletProvider = ({
         encryptionPublicKey: walletAPI.encryptionPublicKey,
         balanceTx(
           tx: UnbalancedTransaction,
-          newCoins: CoinInfo[]
-        ): Promise<BalancedTransaction> {
+          newCoins: CoinInfo[],
+        ): Promise<BalancedProvingRecipe> {
           return walletAPI.wallet
             .balanceAndProveTransaction(
               ZswapTransaction.deserialize(
                 tx.serialize(getLedgerNetworkId()),
-                getZswapNetworkId()
+                getZswapNetworkId(),
               ),
-              newCoins
+              newCoins,
             )
             .then((zswapTx) =>
               Transaction.deserialize(
                 zswapTx.serialize(getZswapNetworkId()),
-                getLedgerNetworkId()
-              )
+                getLedgerNetworkId(),
+              ),
             )
             .then(createBalancedTx);
         },
@@ -204,7 +204,7 @@ const MidnightWalletProvider = ({
   const midnightProvider = useMemo(() => {
     if (walletAPI) {
       return {
-        submitTx(tx: BalancedTransaction): Promise<TransactionId> {
+        submitTx(tx: BalancedProvingRecipe): Promise<TransactionId> {
           return walletAPI.wallet.submitTransaction(tx);
         },
       };

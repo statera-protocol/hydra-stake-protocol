@@ -17,15 +17,9 @@ import {
   HydraStakePrivateState,
   StakePoolStatus,
 } from "@hydra/hydra-stake-protocol";
-import {
-  parseCoinPublicKeyToHex,
-  toHex,
-} from "@midnight-ntwrk/midnight-js-utils";
+import { toHex } from "@midnight-ntwrk/midnight-js-utils";
 import { type Config, StandaloneConfig } from "./config.js";
-import {
-  getLedgerNetworkId,
-  getZswapNetworkId,
-} from "@midnight-ntwrk/midnight-js-network-id";
+import { getNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
 import * as Rx from "rxjs";
 import { type Wallet } from "@midnight-ntwrk/wallet-api";
 import type {
@@ -37,9 +31,9 @@ import { Transaction as ZswapTransaction } from "@midnight-ntwrk/zswap";
 import {
   nativeToken,
   Transaction,
-  type CoinInfo,
+  type ShieldedCoinInfo,
   type TransactionId,
-} from "@midnight-ntwrk/ledger";
+} from "@midnight-ntwrk/ledger-v6";
 import {
   type MidnightProvider,
   type WalletProvider,
@@ -64,12 +58,12 @@ import { webcrypto } from "node:crypto";
  */
 export const getHydraStakeLedgerState = (
   providers: HydraStakeContractProviders,
-  contractAddress: ContractAddress
+  contractAddress: ContractAddress,
 ): Promise<Ledger | null> =>
   providers.publicDataProvider
     .queryContractState(contractAddress)
     .then((contractState) =>
-      contractState != null ? ledger(contractState.data) : null
+      contractState != null ? ledger(contractState.data) : null,
     );
 
 const DEPLOY_OR_JOIN_QUESTION = `
@@ -82,7 +76,7 @@ const DEPLOY_OR_JOIN_QUESTION = `
 const resolve = async (
   providers: HydraStakeContractProviders,
   rli: Interface,
-  logger: Logger
+  logger: Logger,
 ): Promise<HydraAPI | null> => {
   let api: HydraAPI | null = null;
 
@@ -90,13 +84,21 @@ const resolve = async (
     const choice = await rli.question(DEPLOY_OR_JOIN_QUESTION);
     switch (choice) {
       case "1":
-        api = await HydraAPI.deployHydraStakeContract(providers, {
-          mintDomain: await rli.question("Specify token domain seperator"),
-          deleglationContractAddress: await rli.question("Specify delegate contract address"),
-          scaleFactor: BigInt(Number(await rli.question("Specify token scale factor")))
-        }, logger);
+        api = await HydraAPI.deployHydraStakeContract(
+          providers,
+          {
+            mintDomain: await rli.question("Specify token domain seperator"),
+            deleglationContractAddress: await rli.question(
+              "Specify delegate contract address",
+            ),
+            scaleFactor: BigInt(
+              Number(await rli.question("Specify token scale factor")),
+            ),
+          },
+          logger,
+        );
         logger.info(
-          `Deployed contract at address: ${api.deployedContractAddress}`
+          `Deployed contract at address: ${api.deployedContractAddress}`,
         );
         return api;
 
@@ -104,10 +106,10 @@ const resolve = async (
         api = await HydraAPI.joinHydraStakeContract(
           providers,
           await rli.question("What is the contract address (in hex)?"),
-          logger
+          logger,
         );
         logger.info(
-          `Joined contract at address: ${api.deployedContractAddress}`
+          `Joined contract at address: ${api.deployedContractAddress}`,
         );
         return api;
     }
@@ -117,55 +119,70 @@ const resolve = async (
 const displayLedgerState = async (
   providers: HydraStakeContractProviders,
   deployedStateraContract: DeployedHydraStakeOnchainContract,
-  logger: Logger
+  logger: Logger,
 ): Promise<void> => {
   const contractAddress =
     deployedStateraContract.deployTxData.public.contractAddress;
-  const ledgerState = await getHydraStakeLedgerState(providers, contractAddress);
+  const ledgerState = await getHydraStakeLedgerState(
+    providers,
+    contractAddress,
+  );
   if (ledgerState === null) {
     logger.info(
-      `There is no token mint contract deployed at ${contractAddress}`
+      `There is no token mint contract deployed at ${contractAddress}`,
     );
   } else {
+    console.log(`Current admins: ${ledgerState.admins}`);
+    console.log(`Current stake pool amount is:`, ledgerState.protocolTVL);
     console.log(
-      `Current admins: ${ledgerState.admins}`
+      `Current total value minted is:`,
+      ledgerState.total_stAsset_Minted,
     );
-    console.log(
-      `Current stake pool amount is:`,
-      ledgerState.protocolTVL
-    );
-    console.log(`Current total value minted is:`, ledgerState.total_stAsset_Minted);
     console.log(`Current staker:`, ledgerState.stakings);
-    console.log(`Current stake pool status:`, ledgerState.stakePoolStatus == StakePoolStatus.available ? "AVAILABLE" : "DELEGATED");
+    console.log(
+      `Current stake pool status:`,
+      ledgerState.stakePoolStatus == StakePoolStatus.available
+        ? "AVAILABLE"
+        : "DELEGATED",
+    );
     console.log(`Current mint token color is:`, ledgerState.stAssetCoinColor);
-    console.log(`Current valid asset color is:`, ledgerState.validAssetCoinType);
+    console.log(
+      `Current valid asset color is:`,
+      ledgerState.validAssetCoinType,
+    );
     console.log(`Current token scaleFactor is:`, ledgerState.SCALE_FACTOR);
-    console.log(`Current third party contract address is:`, ledgerState.delegationContractAddress);
+    console.log(
+      `Current third party contract address is:`,
+      ledgerState.delegationContractAddress,
+    );
   }
 };
 
 const displayDerivedLedgerState = async (
   currentState: DerivedHydraStakeContractState,
-  logger: Logger
+  logger: Logger,
 ): Promise<void> => {
-  logger.info(
-    `Current admins: ${currentState.admins}`
-  );
-  console.log(
-    `Current stake pool amount is:`,
-    currentState.protocolTVL
-  );
+  logger.info(`Current admins: ${currentState.admins}`);
+  console.log(`Current stake pool amount is:`, currentState.protocolTVL);
   console.log(`Current total value minted is:`, currentState.totalMint);
   console.log(`Current staker:`, currentState.stakings);
-  console.log(`Current stake pool status:`, currentState.stakePoolStatus == StakePoolStatus.available ? "AVAILABLE" : "DELEGATED");
+  console.log(
+    `Current stake pool status:`,
+    currentState.stakePoolStatus == StakePoolStatus.available
+      ? "AVAILABLE"
+      : "DELEGATED",
+  );
   console.log(`Current mint token color is:`, currentState.mintTokenColor);
   console.log(`Current valid asset color is:`, currentState.validAssetCoinType);
   console.log(`Current token scaleFactor is:`, currentState.scaleFactor);
-  console.log(`Current third party contract address is:`, currentState.delegationContractAddress);
+  console.log(
+    `Current third party contract address is:`,
+    currentState.delegationContractAddress,
+  );
 };
 
 const getUserPrivateState = async (
-  providers: HydraStakeContractProviders
+  providers: HydraStakeContractProviders,
 ): Promise<HydraStakePrivateState | null> =>
   providers.privateStateProvider
     .get(hydraStakePrivateStateId)
@@ -173,12 +190,14 @@ const getUserPrivateState = async (
 
 const displayUserPrivateState = async (
   providers: HydraStakeContractProviders,
-  logger: Logger
+  logger: Logger,
 ) => {
   const privateState = await getUserPrivateState(providers);
 
   if (privateState === null)
-    logger.info(`There is no private state stored at ${hydraStakePrivateStateId}`);
+    logger.info(
+      `There is no private state stored at ${hydraStakePrivateStateId}`,
+    );
   console.log(`Current collateral reserved is:`, privateState?.stakeMetadata);
   logger.info(`Current secrete-key is: ${privateState?.secretKey}`);
 };
@@ -202,7 +221,7 @@ const circuit_main_loop = async (
   wallet: Wallet & Resource,
   providers: HydraStakeContractProviders,
   rli: Interface,
-  logger: Logger
+  logger: Logger,
 ): Promise<void> => {
   const hydraDeployedApi = await resolve(providers, rli, logger);
   if (hydraDeployedApi === null) return;
@@ -220,19 +239,18 @@ const circuit_main_loop = async (
     while (true) {
       const choice = await rli.question(CIRCUIT_MAIN_LOOP_QUESTION);
       switch (choice) {
-
         case "1": {
           await displayLedgerState(
             providers,
             hydraDeployedApi.allReadyDeployedContract,
-            logger
+            logger,
           );
           break;
         }
         case "2": {
           await displayDerivedLedgerState(
             currentState as DerivedHydraStakeContractState,
-            logger
+            logger,
           );
           break;
         }
@@ -250,7 +268,7 @@ const circuit_main_loop = async (
           logger.info("Setting mint token color...");
           await hydraDeployedApi.setMintTokenColor();
           logger.info(
-            "Waiting for wallet to sync after setting mint token color..."
+            "Waiting for wallet to sync after setting mint token color...",
           );
           await waitForWalletSyncAfterOperation(wallet, logger);
           await displayComprehensiveWalletState(wallet, currentState, logger);
@@ -261,11 +279,9 @@ const circuit_main_loop = async (
           // New option to manually check wallet state
           logger.info("Staking token to pool...");
           await hydraDeployedApi?.stake(
-            Number(await rli.question("Enter stake amount: "))
+            Number(await rli.question("Enter stake amount: ")),
           );
-          logger.info(
-            "Waiting for wallet to sync after staking..."
-          );
+          logger.info("Waiting for wallet to sync after staking...");
           await waitForWalletSyncAfterOperation(wallet, logger);
           await displayComprehensiveWalletState(wallet, currentState, logger);
           break;
@@ -275,11 +291,9 @@ const circuit_main_loop = async (
           // New option to manually check wallet state
           logger.info("Redeeming token from pool...");
           await hydraDeployedApi?.redeem(
-            Number(await rli.question("Enter stake amount to redeem: "))
+            Number(await rli.question("Enter stake amount to redeem: ")),
           );
-          logger.info(
-            "Waiting for wallet to sync after redeeming..."
-          );
+          logger.info("Waiting for wallet to sync after redeeming...");
           await waitForWalletSyncAfterOperation(wallet, logger);
           await displayComprehensiveWalletState(wallet, currentState, logger);
           break;
@@ -289,9 +303,7 @@ const circuit_main_loop = async (
           // New option to manually check wallet state
           logger.info("Delegating token to third party...");
           await hydraDeployedApi?.delegate();
-          logger.info(
-            "Waiting for wallet to sync after redeeming..."
-          );
+          logger.info("Waiting for wallet to sync after redeeming...");
           await waitForWalletSyncAfterOperation(wallet, logger);
           await displayComprehensiveWalletState(wallet, currentState, logger);
           break;
@@ -311,7 +323,7 @@ const circuit_main_loop = async (
 };
 
 export const createWalletAndMidnightProvider = async (
-  wallet: Wallet
+  wallet: Wallet,
 ): Promise<WalletProvider & MidnightProvider> => {
   const state = await Rx.firstValueFrom(wallet.state());
   return {
@@ -319,22 +331,22 @@ export const createWalletAndMidnightProvider = async (
     encryptionPublicKey: state.encryptionPublicKey,
     balanceTx(
       tx: UnbalancedTransaction,
-      newCoins: CoinInfo[]
+      newCoins: ShieldedCoinInfo[],
     ): Promise<BalancedTransaction> {
       return wallet
         .balanceTransaction(
           ZswapTransaction.deserialize(
-            tx.serialize(getLedgerNetworkId()),
-            getZswapNetworkId()
+            tx.serialize(getNetworkId()),
+            getNetworkId(),
           ),
-          newCoins
+          newCoins,
         )
         .then((tx) => wallet.proveTransaction(tx))
         .then((zswapTx) =>
           Transaction.deserialize(
-            zswapTx.serialize(getZswapNetworkId()),
-            getLedgerNetworkId()
-          )
+            zswapTx.serialize(getNetworkId()),
+            getNetworkId(),
+          ),
         )
         .then(createBalancedTx);
     },
@@ -352,14 +364,14 @@ export const waitForSync = (wallet: Wallet, logger: Logger) =>
         const applyGap = state.syncProgress?.lag.applyGap ?? 0n;
         const sourceGap = state.syncProgress?.lag.sourceGap ?? 0n;
         logger.info(
-          `Waiting for funds. Backend lag: ${sourceGap}, wallet lag: ${applyGap}, transactions=${state.transactionHistory.length}`
+          `Waiting for funds. Backend lag: ${sourceGap}, wallet lag: ${applyGap}, transactions=${state.transactionHistory.length}`,
         );
       }),
       Rx.filter((state) => {
         // Let's allow progress only if wallet is synced fully
         return state.syncProgress !== undefined && state.syncProgress.synced;
-      })
-    )
+      }),
+    ),
   );
 
 export const waitForSyncProgress = async (wallet: Wallet, logger: Logger) =>
@@ -370,14 +382,14 @@ export const waitForSyncProgress = async (wallet: Wallet, logger: Logger) =>
         const applyGap = state.syncProgress?.lag.applyGap ?? 0n;
         const sourceGap = state.syncProgress?.lag.sourceGap ?? 0n;
         logger.info(
-          `Waiting for funds. Backend lag: ${sourceGap}, wallet lag: ${applyGap}, transactions=${state.transactionHistory.length}`
+          `Waiting for funds. Backend lag: ${sourceGap}, wallet lag: ${applyGap}, transactions=${state.transactionHistory.length}`,
         );
       }),
       Rx.filter((state) => {
         // Let's allow progress only if syncProgress is defined
         return state.syncProgress !== undefined;
-      })
-    )
+      }),
+    ),
   );
 
 export const waitForFunds = (wallet: Wallet, logger: Logger) =>
@@ -388,7 +400,7 @@ export const waitForFunds = (wallet: Wallet, logger: Logger) =>
         const applyGap = state.syncProgress?.lag.applyGap ?? 0n;
         const sourceGap = state.syncProgress?.lag.sourceGap ?? 0n;
         logger.info(
-          `Waiting for funds. Backend lag: ${sourceGap}, wallet lag: ${applyGap}, transactions=${state.transactionHistory.length}`
+          `Waiting for funds. Backend lag: ${sourceGap}, wallet lag: ${applyGap}, transactions=${state.transactionHistory.length}`,
         );
       }),
       Rx.filter((state) => {
@@ -396,26 +408,26 @@ export const waitForFunds = (wallet: Wallet, logger: Logger) =>
         return state.syncProgress?.synced === true;
       }),
       Rx.map((s) => s.balances[nativeToken()] ?? 0n),
-      Rx.filter((balance) => balance > 0n)
-    )
+      Rx.filter((balance) => balance > 0n),
+    ),
   );
 
 export const isAnotherChain = async (
   wallet: Wallet,
   offset: number,
-  logger: Logger
+  logger: Logger,
 ) => {
   await waitForSyncProgress(wallet, logger);
   // Here wallet does not expose the offset block it is synced to, that is why this workaround
   const walletOffset = Number(JSON.parse(await wallet.serializeState()).offset);
   if (walletOffset < offset - 1) {
     logger.info(
-      `Your offset offset is: ${walletOffset} restored offset: ${offset} so it is another chain`
+      `Your offset offset is: ${walletOffset} restored offset: ${offset} so it is another chain`,
     );
     return true;
   } else {
     logger.info(
-      `Your offset offset is: ${walletOffset} restored offset: ${offset} ok`
+      `Your offset offset is: ${walletOffset} restored offset: ${offset} ok`,
     );
     return false;
   }
@@ -426,7 +438,7 @@ export const waitForTokenBalance = (
   tokenType: string,
   minimumAmount: bigint,
   logger: Logger,
-  timeoutMs: number = 30000
+  timeoutMs: number = 30000,
 ): Promise<bigint> =>
   Rx.firstValueFrom(
     wallet.state().pipe(
@@ -436,7 +448,7 @@ export const waitForTokenBalance = (
         const applyGap = state.syncProgress?.lag.applyGap ?? 0n;
         const sourceGap = state.syncProgress?.lag.sourceGap ?? 0n;
         logger.info(
-          `Waiting for ${tokenType} balance. Current: ${balance}, Target: ${minimumAmount}, Backend lag: ${sourceGap}, Wallet lag: ${applyGap}`
+          `Waiting for ${tokenType} balance. Current: ${balance}, Target: ${minimumAmount}, Backend lag: ${sourceGap}, Wallet lag: ${applyGap}`,
         );
       }),
       Rx.filter((state) => {
@@ -444,15 +456,15 @@ export const waitForTokenBalance = (
         return state.syncProgress?.synced === true && balance >= minimumAmount;
       }),
       Rx.map((state) => state.balances[tokenType] ?? 0n),
-      Rx.timeout(timeoutMs)
-    )
+      Rx.timeout(timeoutMs),
+    ),
   );
 
 // Enhanced function to wait for wallet sync after operations
 export const waitForWalletSyncAfterOperation = async (
   wallet: Wallet,
   logger: Logger,
-  timeoutMs: number = 30000
+  timeoutMs: number = 30000,
 ): Promise<void> => {
   try {
     await Rx.firstValueFrom(
@@ -462,14 +474,14 @@ export const waitForWalletSyncAfterOperation = async (
           const applyGap = state.syncProgress?.lag.applyGap ?? 0n;
           const sourceGap = state.syncProgress?.lag.sourceGap ?? 0n;
           logger.info(
-            `Syncing after operation. Backend lag: ${sourceGap}, Wallet lag: ${applyGap}`
+            `Syncing after operation. Backend lag: ${sourceGap}, Wallet lag: ${applyGap}`,
           );
         }),
         Rx.filter((state) => {
           return state.syncProgress?.synced === true;
         }),
-        Rx.timeout(timeoutMs)
-      )
+        Rx.timeout(timeoutMs),
+      ),
     );
     logger.info("Wallet sync completed after operation");
   } catch (error) {
@@ -481,14 +493,14 @@ export const waitForWalletSyncAfterOperation = async (
 const displayComprehensiveWalletState = async (
   wallet: Wallet,
   currentContractState: DerivedHydraStakeContractState | undefined,
-  logger: Logger
+  logger: Logger,
 ): Promise<void> => {
   const state = await Rx.firstValueFrom(wallet.state());
 
   logger.info("=== WALLET STATE ===");
   logger.info(`Address: ${state.address}`);
   logger.info(
-    `Sync Status: ${state.syncProgress?.synced ? "SYNCED" : "SYNCING"}`
+    `Sync Status: ${state.syncProgress?.synced ? "SYNCED" : "SYNCING"}`,
   );
 
   if (state.syncProgress) {
@@ -513,14 +525,14 @@ export const buildEnhancedWalletAndWaitForFunds = async (
   config: Config,
   seed: string,
   filename: string,
-  logger: Logger
+  logger: Logger,
 ): Promise<Wallet & Resource> => {
   // ... (keep existing wallet building logic)
   const wallet = await buildWalletAndWaitForFunds(
     config,
     seed,
     filename,
-    logger
+    logger,
   );
 
   // Set up continuous state monitoring
@@ -548,19 +560,19 @@ export const buildWalletAndWaitForFunds = async (
   { indexer, indexerWS, node, proofServer }: Config,
   seed: string,
   filename: string,
-  logger: Logger
+  logger: Logger,
 ): Promise<Wallet & Resource> => {
   const directoryPath = process.env.SYNC_CACHE;
   let wallet: Wallet & Resource;
   if (directoryPath !== undefined) {
     if (fs.existsSync(`${directoryPath}/${filename}`)) {
       logger.info(
-        `Attempting to restore state from ${directoryPath}/${filename}`
+        `Attempting to restore state from ${directoryPath}/${filename}`,
       );
       try {
         const serializedStream = fs.createReadStream(
           `${directoryPath}/${filename}`,
-          "utf-8"
+          "utf-8",
         );
         const serialized = await streamToString(serializedStream);
         serializedStream.on("finish", () => {
@@ -573,7 +585,7 @@ export const buildWalletAndWaitForFunds = async (
           node,
           seed,
           serialized,
-          "info"
+          "info",
         );
         wallet.start();
         const stateObject = JSON.parse(serialized);
@@ -588,8 +600,8 @@ export const buildWalletAndWaitForFunds = async (
             proofServer,
             node,
             seed,
-            getZswapNetworkId(),
-            "info"
+            getNetworkId(),
+            "info",
           );
           wallet.start();
         } else {
@@ -600,13 +612,13 @@ export const buildWalletAndWaitForFunds = async (
           } else {
             logger.info(`Offset: ${stateObject.offset}`);
             logger.info(
-              `SyncProgress.lag.applyGap: ${newState.syncProgress?.lag.applyGap}`
+              `SyncProgress.lag.applyGap: ${newState.syncProgress?.lag.applyGap}`,
             );
             logger.info(
-              `SyncProgress.lag.sourceGap: ${newState.syncProgress?.lag.sourceGap}`
+              `SyncProgress.lag.sourceGap: ${newState.syncProgress?.lag.sourceGap}`,
             );
             logger.warn(
-              "Wallet was not able to sync from restored state, building wallet from scratch"
+              "Wallet was not able to sync from restored state, building wallet from scratch",
             );
             wallet = await WalletBuilder.build(
               indexer,
@@ -614,8 +626,8 @@ export const buildWalletAndWaitForFunds = async (
               proofServer,
               node,
               seed,
-              getZswapNetworkId(),
-              "info"
+              getNetworkId(),
+              "info",
             );
             wallet.start();
           }
@@ -629,7 +641,7 @@ export const buildWalletAndWaitForFunds = async (
           logger.error(error);
         }
         logger.warn(
-          "Wallet was not able to restore using the stored state, building wallet from scratch"
+          "Wallet was not able to restore using the stored state, building wallet from scratch",
         );
         wallet = await WalletBuilder.build(
           indexer,
@@ -637,8 +649,8 @@ export const buildWalletAndWaitForFunds = async (
           proofServer,
           node,
           seed,
-          getZswapNetworkId(),
-          "info"
+          getNetworkId(),
+          "info",
         );
         wallet.start();
       }
@@ -650,14 +662,14 @@ export const buildWalletAndWaitForFunds = async (
         proofServer,
         node,
         seed,
-        getZswapNetworkId(),
-        "info"
+        getNetworkId(),
+        "info",
       );
       wallet.start();
     }
   } else {
     logger.info(
-      "File path for save file not found, building wallet from scratch"
+      "File path for save file not found, building wallet from scratch",
     );
     wallet = await WalletBuilder.build(
       indexer,
@@ -665,8 +677,8 @@ export const buildWalletAndWaitForFunds = async (
       proofServer,
       node,
       seed,
-      getZswapNetworkId(),
-      "info"
+      getNetworkId(),
+      "info",
     );
     wallet.start();
   }
@@ -693,7 +705,7 @@ export const randomBytes = (length: number): Uint8Array => {
 // Generate a random see and create the wallet with that.
 export const buildFreshWallet = async (
   config: Config,
-  logger: Logger
+  logger: Logger,
 ): Promise<Wallet & Resource> =>
   await buildWalletAndWaitForFunds(config, toHex(randomBytes(32)), "", logger);
 
@@ -701,7 +713,7 @@ export const buildFreshWallet = async (
 const buildWalletFromSeed = async (
   config: Config,
   rli: Interface,
-  logger: Logger
+  logger: Logger,
 ): Promise<Wallet & Resource> => {
   const seed = await rli.question("Enter your wallet seed: ");
   return await buildWalletAndWaitForFunds(config, seed, "", logger);
@@ -724,14 +736,14 @@ Which would you like to do? `;
 const buildWallet = async (
   config: Config,
   rli: Interface,
-  logger: Logger
+  logger: Logger,
 ): Promise<(Wallet & Resource) | null> => {
   if (config instanceof StandaloneConfig) {
     return await buildWalletAndWaitForFunds(
       config,
       GENESIS_MINT_WALLET_SEED,
       "",
-      logger
+      logger,
     );
   }
   while (true) {
@@ -753,7 +765,7 @@ const buildWallet = async (
 const mapContainerPort = (
   env: StartedDockerComposeEnvironment,
   url: string,
-  containerName: string
+  containerName: string,
 ) => {
   const mappedUrl = new URL(url);
   const container = env.getContainer(containerName);
@@ -766,7 +778,7 @@ const mapContainerPort = (
 export const run = async (
   config: Config,
   logger: Logger,
-  dockerEnv?: DockerComposeEnvironment
+  dockerEnv?: DockerComposeEnvironment,
 ): Promise<void> => {
   const rli = createInterface({ input, output, terminal: true });
   let env;
@@ -777,18 +789,18 @@ export const run = async (
       config.indexer = mapContainerPort(
         env,
         config.indexer,
-        "manual-statera-indexer"
+        "manual-statera-indexer",
       );
       config.indexerWS = mapContainerPort(
         env,
         config.indexerWS,
-        "manual-statera-indexer"
+        "manual-statera-indexer",
       );
       config.node = mapContainerPort(env, config.node, "manual-statera-node");
       config.proofServer = mapContainerPort(
         env,
         config.proofServer,
-        "manual-statera-proof-server"
+        "manual-statera-proof-server",
       );
     }
   }
@@ -803,7 +815,7 @@ export const run = async (
         }),
         publicDataProvider: indexerPublicDataProvider(
           config.indexer,
-          config.indexerWS
+          config.indexerWS,
         ),
         zkConfigProvider: new NodeZkConfigProvider<never>(config.zkConfigPath),
         proofProvider: httpClientProofProvider(config.proofServer),
@@ -838,7 +850,7 @@ export const run = async (
             logger.info("Goodbye");
             process.exit(0);
           }
-        } catch (e) { }
+        } catch (e) {}
       }
     }
   }

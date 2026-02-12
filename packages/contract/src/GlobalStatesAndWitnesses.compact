@@ -8,7 +8,7 @@ module GlobalStatesAndWitnesses{
     export ledger total_stake_withdrawn: Uint<128>; 
 
     /** Tracks protocol coin I/O */
-    export ledger protocolTVL: QualifiedCoinInfo; // It's value reflect the total underlying assets
+    export ledger protocolTVL: QualifiedShieldedCoinInfo; // It's value reflect the total underlying assets
     export ledger stakePoolStatus: StakePoolStatus;
 
     /** Record the entire stake entries */

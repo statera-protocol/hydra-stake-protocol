@@ -18,13 +18,13 @@ export function pad(s: string, n: number): Uint8Array {
 }
 
 export function uint8arraytostring(array: Uint8Array): string {
-  // // Debug logging
-  // console.log(
-  //   "Converting array:",
-  //   Array.from(array)
-  //     .map((b) => b.toString(16).padStart(2, "0"))
-  //     .join("")
-  // );
+  // Debug logging
+  console.log(
+    "Converting array:",
+    Array.from(array)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+  );
   console.log("Array length:", array.length);
 
   if (array.length < 16) {

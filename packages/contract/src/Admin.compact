@@ -3,12 +3,12 @@ module Admin {
     import GlobalStatesAndWitnesses;
 
     /** ADMIN FUNCTIONALITIES */
-    /** Delegates protocol funds to third party  */
+    /** Delegates protocol funds to third party  **/
     export circuit delegate(): Boolean{
         const userPk = ownPublicKey().bytes;
         assert (userPk == superAdmin || admins.member(userPk), "Unauthorized to delegate protocol asset");
         const delegationAmt = protocolTVL.value; //(TESTNING ONLY)
-        send(protocolTVL, right<ZswapCoinPublicKey, ContractAddress>(
+        sendShielded(protocolTVL, right<ZswapCoinPublicKey, ContractAddress>(
             ContractAddress {
                 bytes: delegationContractAddress
             }
