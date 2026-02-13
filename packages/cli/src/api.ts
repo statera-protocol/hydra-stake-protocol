@@ -1,8 +1,8 @@
 import * as utils from "./utils.js"
-import { Contract, ledger, type HydraStakePrivateState, witnesses, Ledger, createHydraStakePrivateState } from '@repo/hydra-stake-protocol';
-import {ZswapSecretKeys, DustSecretKey, Signature, SignatureEnabled, Proofish, PreBinding, Intent, UtxoSpend, LedgerParameters, encodeRawTokenType, nativeToken, encodeContractAddress} from '@midnight-ntwrk/ledger-v7';
+import { Contract, ledger, type HydraStakePrivateState, witnesses, Ledger, createHydraStakePrivateState, StakePoolStatus, ShieldedCoinInfo } from '@repo/hydra-stake-protocol';
+import {ZswapSecretKeys, DustSecretKey, Signature, SignatureEnabled, Proofish, PreBinding, Intent, UtxoSpend, LedgerParameters, encodeRawTokenType, nativeToken, encodeContractAddress, rawTokenType} from '@midnight-ntwrk/ledger-v7';
 import { unshieldedToken } from '@midnight-ntwrk/ledger-v7';
-import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
+import { deployContract, FinalizedCallTxData, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
@@ -43,6 +43,7 @@ import {
   ShieldedEncryptionPublicKey,
 } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { ContractAddress } from "@midnight-ntwrk/compact-runtime";
+import { hydraStakePrivateStateId } from "@repo/hydra-stake-api";
 
 let logger: Logger;
 
@@ -76,6 +77,29 @@ export const getHydraStakeLedgerState = async (
   return state;
 };
 
+export const displayDerivedLedgerState = async (
+  currentState: DerivedHydraStakeContractState,
+  logger: Logger,
+): Promise<void> => {
+  logger.info(`Current admins: ${currentState.admins}`);
+  console.log(`Current stake pool amount is:`, currentState.protocolTVL);
+  console.log(`Current total value minted is:`, currentState.totalMint);
+  console.log(`Current staker:`, currentState.stakings);
+  console.log(
+    `Current stake pool status:`,
+    currentState.stakePoolStatus == StakePoolStatus.available
+      ? "AVAILABLE"
+      : "DELEGATED",
+  );
+  console.log(`Current mint token color is:`, currentState.mintTokenColor);
+  console.log(`Current valid asset color is:`, currentState.validAssetCoinType);
+  console.log(`Current token scaleFactor is:`, currentState.scaleFactor);
+  console.log(
+    `Current third party contract address is:`,
+    currentState.delegationContractAddress,
+  );
+};
+
 export const getHydraStakePrivateState = async (
   providers: HydraStakeProviders,
   contractAddress: ContractAddress,
@@ -88,6 +112,23 @@ export const getHydraStakePrivateState = async (
   logger.info(`Ledger state: ${state}`);
   return state;
 };
+
+export const displayUserPrivateState = async (
+    providers: HydraStakeProviders,
+    contractAddress: ContractAddress,
+    logger: Logger,
+  ) => {
+    assertIsContractAddress(contractAddress);
+    logger.info('Loading user private state...');
+    const privateState = await getHydraStakePrivateState(providers, contractAddress);
+  
+    if (privateState === null)
+      logger.info(
+        `There is no private state stored at ${hydraStakePrivateStateId}`,
+      );
+    console.log(`Current collateral reserved is:`, privateState?.stakeMetadata);
+    logger.info(`Current secrete-key is: ${privateState?.secretKey}`);
+  };
 
 export const HydraStakeContractInstance: HydraStakeContract = new Contract(witnesses);
 
@@ -104,6 +145,180 @@ export const joinContract = async (
   logger.info(`Joined contract at address: ${HydraStakeContract.deployTxData.public.contractAddress}`);
   return HydraStakeContract;
 };
+
+export const setMintTokenColor = async (
+  deployedContract: DeployedHydraStakeContract
+): Promise<
+FinalizedCallTxData<HydraStakeContract, "setTokenColor">
+> => {
+const txData = await deployedContract.callTx.setTokenColor();
+
+logger?.trace({
+  transactionAdded: {
+    circuit: "setTokenColor",
+    txHash: txData.public.txHash,
+    blockDetails: {
+      blockHash: txData.public.blockHash,
+      blockHeight: txData.public.blockHeight,
+    },
+  },
+});
+
+return txData;
+}
+
+const coin = (amount: number): ShieldedCoinInfo => {
+  return {
+    color: encodeRawTokenType(nativeToken().tag),
+    nonce: utils.randomNonceBytes(32),
+    value: BigInt(amount),
+  };
+}
+
+  const stCoin = (amount: number, contractAddress: ContractAddress): ShieldedCoinInfo => {
+    return {
+      color: encodeRawTokenType(
+        rawTokenType(
+          utils.pad("hydra:htDUST", 32),
+          contractAddress
+        ),
+      ),
+      nonce: utils.randomNonceBytes(32),
+      value: BigInt(amount),
+    };
+  }
+
+const state = (
+  providers: HydraStakeProviders,
+  contractAddress: ContractAddress
+): Rx.Observable<DerivedHydraStakeContractState> => {
+return Rx.combineLatest(
+  [
+    providers.publicDataProvider
+      .contractStateObservable(contractAddress, {
+        type: "all",
+      })
+      .pipe(
+        Rx.map((contractState) => ledger(contractState.data)),
+        Rx.tap((ledgerState) =>
+          logger?.trace({
+            ledgerStaeChanged: {
+              ledgerState: {
+                ...ledgerState,
+              },
+            },
+          }),
+        ),
+      ),
+    Rx.concat(
+      Rx.from(providers.privateStateProvider.get(hydraStakePrivateStateId)),
+    ),
+  ],
+  (ledgerState, privateState) => {
+    return {
+      totalMint: ledgerState.total_stAsset_Minted,
+      protocolTVL: ledgerState.protocolTVL,
+      mintTokenColor: utils.uint8arraytostring(
+        ledgerState.stAssetCoinColor,
+      ),
+      delegationContractAddress: utils.uint8arraytostring(
+        ledgerState.delegationContractAddress,
+      ),
+      superAdmin: toHex(ledgerState.superAdmin),
+      admins: utils.createDerivedAdminArray(ledgerState.admins),
+      stakePoolStatus: ledgerState.stakePoolStatus,
+      stakings: utils.createArrayFromLedgerMapping(ledgerState.stakings),
+      validAssetCoinType: utils.uint8arraytostring(
+        ledgerState.validAssetCoinType,
+      ),
+      scaleFactor: ledgerState.SCALE_FACTOR,
+      depositAmount: privateState
+        ? privateState?.stakeMetadata.deposit_amount
+        : 0n,
+      stAssetMinted: privateState
+        ? privateState?.stakeMetadata.stAssets_minted
+        : 0n,
+      redeemable: privateState
+        ? privateState?.stakeMetadata.redeemable
+        : 0n,
+    };
+  },
+);
+}
+
+export const stake = async (
+  amount: number,
+  deployedContract: DeployedHydraStakeContract,
+  providers: HydraStakeProviders
+): Promise<FinalizedCallTxData<HydraStakeContract, "stake">> =>  {
+  const scaleFactor = await Rx.firstValueFrom(
+    state(providers, deployedContract.deployTxData.public.contractAddress).pipe(Rx.map((state) => Number(state.scaleFactor))),
+  );
+  const txData = await deployedContract.callTx.stake(
+    coin(scaleFactor * amount),
+  );
+
+  logger?.trace({
+    transactionAdded: {
+      circuit: "stake",
+      txHash: txData.public.txHash,
+      blockDetails: {
+        blockHash: txData.public.blockHash,
+        blockHeight: txData.public.blockHeight,
+      },
+    },
+  });
+
+  return txData;
+}
+
+export const redeem = async (
+  amount: number,
+  deployedContract: DeployedHydraStakeContract,
+  providers: HydraStakeProviders
+): Promise<FinalizedCallTxData<HydraStakeContract, "redeem">> => {
+  const scaleFactor = await Rx.firstValueFrom(
+    state(providers, deployedContract.deployTxData.public.contractAddress).pipe(Rx.map((state) => Number(state.scaleFactor))),
+  );
+  const txData = await deployedContract.callTx.redeem(
+    stCoin(scaleFactor * amount, deployedContract.deployTxData.public.contractAddress),
+  );
+
+  logger?.trace({
+    transactionAdded: {
+      circuit: "redeem",
+      txHash: txData.public.txHash,
+      blockDetails: {
+        blockHash: txData.public.blockHash,
+        blockHeight: txData.public.blockHeight,
+      },
+    },
+  });
+
+  return txData;
+}
+
+export const delegate = async (
+  deployedContract: DeployedHydraStakeContract
+): Promise<
+    FinalizedCallTxData<HydraStakeContract, "delegate">
+  > => {
+    console.log("Retrieved scale factor");
+    const txData = await deployedContract.callTx.delegate();
+
+    logger?.trace({
+      transactionAdded: {
+        circuit: "delegate",
+        txHash: txData.public.txHash,
+        blockDetails: {
+          blockHash: txData.public.blockHash,
+          blockHeight: txData.public.blockHeight,
+        },
+      },
+    });
+
+    return txData;
+  }
 
 export const deploy = async (
   providers: HydraStakeProviders,

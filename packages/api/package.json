@@ -16,6 +16,7 @@
     "prebuild": "rm -rf dist && tsc --project tsconfig.build.json"
   },
   "dependencies": {
+    "@repo/hydra-stake-cli": "workspace:*",
     "@repo/hydra-stake-protocol": "workspace:*",
     "pino": "^8.16.1",
     "uuid": "^11.1.0",

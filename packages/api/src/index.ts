@@ -33,14 +33,14 @@ import {
   type ShieldedCoinInfo,
   createHydraStakePrivateState,
   HydraStakePrivateState,
-} from "@hydra/hydra-stake-protocol";
+} from "@repo/hydra-stake-protocol";
 import { type Logger } from "pino";
 import * as utils from "./utils.js";
 import {
   nativeToken,
   encodeRawTokenType,
   rawTokenType,
-} from "@midnight-ntwrk/ledger-v6";
+} from "@midnight-ntwrk/ledger-v7";
 import { toHex } from "@midnight-ntwrk/midnight-js-utils";
 
 const HydraStakeContractInstance: HydraStakeContract = new Contract(witnesses);

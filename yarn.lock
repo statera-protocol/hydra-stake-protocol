@@ -3936,6 +3936,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@repo/hydra-stake-api@workspace:packages/api"
   dependencies:
+    "@repo/hydra-stake-cli": "workspace:*"
     "@repo/hydra-stake-protocol": "workspace:*"
     "@types/ws": "npm:^8.5.9"
     allure-commandline: "npm:^2.28.0"
@@ -3950,7 +3951,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@repo/hydra-stake-cli@workspace:packages/cli":
+"@repo/hydra-stake-cli@workspace:*, @repo/hydra-stake-cli@workspace:packages/cli":
   version: 0.0.0-use.local
   resolution: "@repo/hydra-stake-cli@workspace:packages/cli"
   dependencies:

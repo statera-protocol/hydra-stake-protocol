@@ -3,7 +3,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { createInterface, type Interface } from 'node:readline/promises';
 import { type Logger } from 'pino';
 import { type StartedDockerComposeEnvironment, type DockerComposeEnvironment } from 'testcontainers';
-import { type HydraStakeProviders, type DeployedHydraStakeContract, contractAddress } from './common-types.js';
+import { type HydraStakeProviders, type DeployedHydraStakeContract, contractAddress, DerivedHydraStakeContractState } from './common-types.js';
 import { type Config, StandaloneConfig } from './config';
 import * as api from './api.js';
 import { nativeToken } from '@midnight-ntwrk/ledger-v7';
@@ -55,17 +55,18 @@ ${'─'.repeat(62)}
 > `;
 
 /** Build the hydra stke actions menu, showing current DUST balance in the header. */
-const counterMenu = (dustBalance: string) => `
+const hydraStakeMenu = (dustBalance: string) => `
 ${DIVIDER}
-  HYDRASTAKE Actions${dustBalance ? `                     DUST: ${dustBalance}` : ''}
+HYDRASTAKE Actions${dustBalance ? `                     DUST: ${dustBalance}` : ''}
 ${DIVIDER}
-  [1]. Set coin color
-  [2]. Stake Asset
-  [3]. Redeem
-  [4]. Display user private state
-  [5]. Display derived ledger state
-  [6]. Delegating token to third party
-  [7]. Exit
+  [1]. Display Raw Ledger State
+  [2]. Display Derived Ledger State
+  [3]. Display User Private State
+  [4]. Set Contract Coin Color
+  [5]. Stake Asset
+  [6]. Redeem Asset
+  [7]. Delegating Token to Third Party
+  [8]. Exit
 ${'─'.repeat(62)}
 > `;
 
@@ -103,7 +104,7 @@ const buildWallet = async (config: Config, rli: Interface): Promise<WalletContex
   }
 };
 
-// ─── Contract Interaction ───────────────────────────────────────────────────
+// ─── Contract Interaction ──────────Plan, purpose and pursuit - Kenneth Hagin─────────────────────────────────────────
 
 /** Format dust balance for menu headers. */
 const getDustLabel = async (wallet: api.WalletContext['wallet']): Promise<string> => {
@@ -122,7 +123,7 @@ const joinContract = async (providers: HydraStakeProviders, rli: Interface): Pro
 };
 
 /**
- * Start the DUST monitor. Shows a live-updating balance display
+ * Start the DUST monitor. Shows a live-uPlan, purpose and pursuit - Kenneth Haginpdating balance display
  * that runs until the user presses Enter.
  */
 const startDustMonitor = async (wallet: api.WalletContext['wallet'], rli: Interface): Promise<void> => {
@@ -213,81 +214,72 @@ const mainLoop = async (providers: HydraStakeProviders, walletCtx: api.WalletCon
     return;
   }
 
+  let currentState: DerivedHydraStakeContractState | undefined;
+  const stateObserver = {
+    next: (state: DerivedHydraStakeContractState) => {
+      currentState = state;
+    },
+  };
+
   while (true) {
     const dustLabel = await getDustLabel(walletCtx.wallet);
-    const choice = await rli.question(counterMenu(dustLabel));
+    const choice = await rli.question(hydraStakeMenu(dustLabel));
     switch (choice.trim()) {
         case "1": {
-                    await displayLedgerState(
+                    await api.getHydraStakeLedgerState(
                       providers,
-                      hydraDeployedApi.allReadyDeployedContract,
-                      logger,
+                      hydraStakeContract.deployTxData.public.contractAddress,
                     );
                     break;
                   }
                   case "2": {
-                    await displayDerivedLedgerState(
+                    await api.displayDerivedLedgerState(
                       currentState as DerivedHydraStakeContractState,
                       logger,
                     );
                     break;
                   }
                   case "3": {
-                    await displayUserPrivateState(providers, logger);
+                    await api.displayUserPrivateState(providers, hydraStakeContract.deployTxData.public.contractAddress, logger);
                     break;
                   }
                   case "4": {
-                    // New option to manually check wallet state
-                    await displayComprehensiveWalletState(wallet, currentState, logger);
-                    break;
-                  }
-                  case "5": {
-                    // New option to manually check wallet state
                     logger.info("Setting mint token color...");
-                    await hydraDeployedApi.setMintTokenColor();
+                    await api.setMintTokenColor(hydraStakeContract);
                     logger.info(
                       "Waiting for wallet to sync after setting mint token color...",
                     );
-                    await waitForWalletSyncAfterOperation(wallet, logger);
-                    await displayComprehensiveWalletState(wallet, currentState, logger);
+                    break;
+                  }
+          
+                  case "5": {
+                    logger.info("Staking token to pool...");
+                    await api.stake(
+                      Number(await rli.question("Enter stake amount: ")),
+                      hydraStakeContract, providers,
+                    );
+                    logger.info("Waiting for wallet to sync after staking...");
                     break;
                   }
           
                   case "6": {
-                    // New option to manually check wallet state
-                    logger.info("Staking token to pool...");
-                    await hydraDeployedApi?.stake(
-                      Number(await rli.question("Enter stake amount: ")),
-                    );
-                    logger.info("Waiting for wallet to sync after staking...");
-                    await waitForWalletSyncAfterOperation(wallet, logger);
-                    await displayComprehensiveWalletState(wallet, currentState, logger);
-                    break;
-                  }
-          
-                  case "7": {
-                    // New option to manually check wallet state
                     logger.info("Redeeming token from pool...");
-                    await hydraDeployedApi?.redeem(
+                    await api.redeem(
                       Number(await rli.question("Enter stake amount to redeem: ")),
+                      hydraStakeContract, providers
                     );
                     logger.info("Waiting for wallet to sync after redeeming...");
-                    await waitForWalletSyncAfterOperation(wallet, logger);
-                    await displayComprehensiveWalletState(wallet, currentState, logger);
+                    // await waitForWalletSyncAfterOperation(wallet, logger);
+                    // await displayComprehensiveWalletState(wallet, currentState, logger);
                     break;
                   }
-          
-                  case "8": {
-                    // New option to manually check wallet state
+                  case "7": {
                     logger.info("Delegating token to third party...");
-                    await hydraDeployedApi?.delegate();
+                    await api.delegate(hydraStakeContract);
                     logger.info("Waiting for wallet to sync after redeeming...");
-                    await waitForWalletSyncAfterOperation(wallet, logger);
-                    await displayComprehensiveWalletState(wallet, currentState, logger);
                     break;
                   }
-          
-                  case "9": {
+                  case "8": {
                     logger.info("Exiting.......");
                     return;
                   }
