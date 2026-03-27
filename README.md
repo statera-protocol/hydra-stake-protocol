@@ -1,213 +1,184 @@
 # Hydra Stake Protocol
 
-> The only liquid staking protocol on Midnight
-
-[![Midnight](https://img.shields.io/badge/Built%20on-Midnight-purple.svg)](https://midnight.network)
+Privacy-focused staking apps and contracts built on Midnight.
 
 ## Overview
 
-Hydra Stake Protocol is a privacy-preserving liquid staking solution built on Midnight blockchain. It allows users to stake their assets while maintaining liquidity through liquid staking tokens (LST), enabling participation in DeFi while earning staking rewards.
+This repository currently contains two Midnight contract packages and the tooling around them:
 
-## Features
+- `Hydra Night Staking`: fixed-term staking flows
+- `Hydra Liquid Staking`: liquid staking with stake, redeem, delegate, and reward flows
+- a shared CLI that can interact with both contracts
+- client apps for each staking experience
+- an Express server package used for backend integration
 
-### 🔓 Unlocks Liquidity for Staked Assets
+Hydra staking currently has two tracks:
 
-Stake your assets and receive liquid derivative tokens (LST) that can be used across DeFi protocols while your underlying assets continue earning staking rewards.
+- `Hydra Liquid Staking`
+  Liquid staking for different token assets, where users stake supported tokens and receive a liquid representation that can be used elsewhere in the ecosystem.
+- `Hydra Night Staking`
+  A NIGHT-focused staking flow intended to let users stake NIGHT to a backend wallet connected to the contract, generate DUST from those NIGHT UTXOs, and then use that DUST for downstream protocol interactions. The current design direction is per-UTXO handling for delegation and related operations.
 
-### 💰 Improves Capital Efficiency
+## Repository Layout
 
-Maximize yield by earning multiple returns with a single token - combine staking rewards with DeFi opportunities.
-
-### 🔗 Enables DeFi Composability
-
-Use your liquid staking tokens (LSTs) across the DeFi ecosystem:
-
-- Lending protocols
-- Borrowing markets
-- Yield farming
-- Liquidity pools
-- Derivatives markets
-
-This deepens liquidity and strengthens the entire DeFi economy.
-
-## Architecture
-
-### Privacy-First Design
-
-Hydra leverages Midnight's zero-knowledge primitives to provide unprecedented privacy in liquid staking:
-
-#### 1. **Private Staking with Compact Witnesses**
-
-- Staking deposits and unstake requests use private witness inputs
-- Amounts never appear on-chain in plaintext
-- ZK proofs verify deposit/withdrawal correctness while updating shielded state
-- Per-user stake amounts remain completely private
-
-#### 2. **Public LST with Private Backing**
-
-- Liquid staking tokens (sttDust) are publicly tradable and DeFi-composable
-- Underlying staking balances are stored in Midnight's shielded state
-- LST accounting is public for usability; mint/redemption proofs are private
-- Users present ZK proofs of ownership without revealing amounts
-
-#### 3. **Selective Disclosure for Compliance**
-
-- Built-in selective disclosure APIs for auditing
-- Users can prove claims like "I hold ≥ X LST" without revealing identity
-- Compliance-friendly without sacrificing privacy
-- Auditors can verify total staked amounts without accessing individual balances
-
-#### 4. **Shielded Validator Delegation**
-
-- Validator allocations remain private in shielded state
-- Prevents inference of delegation patterns from large holders
-- Internal slashing checks with public proof of correct validator updates
-- No raw delegation assignments exposed on-chain
-
-## Project Structure
-
-```
-turborepo-root/
-├── packages/
-│   ├── ui/                           # Frontend application (Vite + React)
-│   │   ├── src/
-│   │   ├── public/
-│   │   ├── index.html
-│   │   ├── vite.config.ts
-│   │   └── package.json
-│   │
-│   ├── api/                          # Backend API service
-│   │   ├── src/
-│   │   └── package.json
-│   │
-│   ├── contract/                     # Smart contracts
-│   │   ├── Admin.compact            # Admin contract
-│   │   ├── GlobalStatesAndWitnesses.compact  # Global states contract
-│   │   ├── hydra-stake-protocol.compact      # Hydra staking protocol
-│   │   ├── utils.compact            # Contract utilities
-│   │   ├── witnesses.ts             # Witness definitions
-│   │   └── package.json
-│   │
-│   └── cli/                          # Command-line interface tool
-│       ├── src/
-│       └── package.json
-│
-├── turbo.json                        # Turborepo configuration
-├── package.json                      # Root package.json
-└── README.md                        
+```text
+packages/
+  apps/
+    client/
+      hydra-night-staking-ui/
+      hydra-liquid-staking-ui/
+    server/
+  cli/
+  contracts/
+    hydra-night-staking/
+    hydra-liquid-staking/
 ```
 
-## Technology Stack
+## Packages
 
-### Smart Contracts
+### Contracts
 
-- **Language**: Compact (Midnight's ZK contract language)
-- **Runtime**: `@midnight-ntwrk/compact-runtime`
-- **Proof Generation**: Midnight proof server (local)
+- `packages/contracts/hydra-night-staking`
+  Night staking Compact contract and generated bindings.
+- `packages/contracts/hydra-liquid-staking`
+  Liquid staking Compact contract and generated bindings.
 
-### Client Integration
+Both contract packages expose build artifacts from `dist/` after running their local build scripts.
 
-- **SDK**: MidnightJS
-- **Wallet**: Midnight Lace Wallet integration
-- **Witness Generation**: Client-side using Compact Runtime
+### CLI
 
-### Security Architecture
+- `packages/cli`
 
-#### Client-Side Security
+The CLI is a combined operator/developer tool for both contracts. It lets you:
 
-All sensitive operations happen locally:
+- choose either Night Staking or Hydra Liquid Staking
+- deploy a new contract instance or join an existing one
+- call the supported circuits for the selected contract
+- inspect public and private contract state
 
-- Witness generation (stake amounts, stake asset minted amount) in browser
-- ZK proof generation via Midnight proof server
-- Secure RPC endpoints for proof submission
+The CLI loads compiled contract bindings from:
 
-#### Wallet Integration
+- `packages/contracts/hydra-night-staking/dist`
+- `packages/contracts/hydra-liquid-staking/dist`
 
-Midnight Lace Wallet provides:
+Build the contract packages first before running the CLI.
 
-- 🔐 Private key management
-- ✅ Consent screens for ZK witness creation
-- ✍️ Proof signing and verification
-- 🛡️ Protection against witness tampering
+### Apps
+
+- `packages/apps/client/hydra-night-staking-ui`
+  Next.js client for the night staking flow.
+- `packages/apps/client/hydra-liquid-staking-ui`
+  Vite/React client for the liquid staking flow.
+- `packages/apps/server`
+  Express server package for API and contract-integration endpoints.
+
+## Tooling
+
+- Package manager: `bun`
+- Monorepo task runner: `turbo`
+- Contract language: Compact
+- Contract runtime: Midnight Compact runtime / Midnight JS
 
 ## Getting Started
 
 ### Prerequisites
 
-- Midnight Lace Wallet installed
-- Minimum balance: [TBD]
-- Supported network: Testnet
+- `bun`
+- `turbo`
+- Midnight `compact` CLI available on your `PATH`
+- access to a Midnight proof server and target network, depending on the package you are running
 
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/TechMartins72/hydra-stake-protocol.git
-
-# Install dependencies
-cd hydra-stake-protocol
-yarn install
-```
-
-## Development
-
-### Running Locally
+### Install Dependencies
 
 ```bash
-#move into UI package
-cd packages/ui
-
-# copy the .env.example into an actual .env file
-cp .env.example .env
-# Edit .env with your settings
-
-# builds the ui and it dependency
-yarn build
-
-# starts your app
-yarn start
-# Your app should be running on localhost at port: 8080
-
+bun install
 ```
 
-### Accepted assets
-- tDUST
+## Common Commands
 
-### Quick Start
+From the repo root:
 
-1. **Connect Wallet**
-   - Open the dApp and connect your Midnight Lace Wallet
-   - Approve the connection request
+```bash
+bun run build
+bun run dev
+bun run lint
+bun run compact
+```
 
-2. **Stake Assets**
-   - Enter the amount of tDUST you want to stake
-   - Approve the transaction in Lace Wallet
-   - Receive sttDust tokens in your wallet
+## Building The Contracts
 
-3. **Unstake (when needed)**
-   - Click the redeem button on the dashboard
-   - Redeem your original assets
+Build each contract package directly:
 
-### Audits
+```bash
+cd packages/contracts/hydra-night-staking
+bun run build
 
-- [ ] Pending security audit
-- [ ] Bug bounty program: [Coming soon]
+cd ../hydra-liquid-staking
+bun run build
+```
 
-### Known Limitations
+Useful contract commands:
 
-- No delegation third party:
-- Admin functionalities not fully implemented
-- KYC not implemented
+```bash
+bun run compact
+bun run test:compact
+bun run typecheck
+```
 
-## Roadmap
+## Running The CLI
 
-- [x] Core staking/unstaking functionality
-- [x] Midnight Lace Wallet integration
-- [ ] Security audit
-- [ ] Mainnet launch
-- [ ] DeFi protocol integrations
-- [ ] Governance token and DAO
-- [ ] Multi-validator support
+After both contracts are built:
+
+```bash
+cd packages/cli
+bun install
+bun run build
+bun run preview
+```
+
+For local/docker-backed development:
+
+```bash
+cd packages/cli
+bun run standalone
+```
+
+The CLI prompts you to:
+
+1. create or restore a wallet
+2. choose which contract to work with
+3. deploy or join a contract instance
+4. interact with the selected contract
+
+## Running The Apps
+
+### Night Staking UI
+
+```bash
+cd packages/apps/client/hydra-night-staking-ui
+bun install
+bun run dev
+```
+
+### Liquid Staking UI
+
+```bash
+cd packages/apps/client/hydra-liquid-staking-ui
+bun install
+bun run dev
+```
+
+### Server
+
+```bash
+cd packages/apps/server
+bun install
+bun run dev
+```
+
+## Current State
+
+The repo is in active development. Some packages still have inconsistent naming or version alignment inherited from earlier recovery work. The current source of truth for the runtime layout is the actual package tree under `packages/`.
 
 ## Contributors
 
@@ -217,11 +188,7 @@ yarn start
 - [@nescampos](https://github.com/nescampos)
 - [@scisamir](https://github.com/scisamir)
 
-## Acknowledgments
-
-Built with ❤️ on Midnight blockchain
+## References
 
 - [Midnight Network](https://midnight.network)
 - [Midnight Developer Docs](https://docs.midnight.network)
-
----

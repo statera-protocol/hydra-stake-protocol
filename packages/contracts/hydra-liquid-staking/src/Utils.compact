@@ -1,0 +1,106 @@
+module Utils {
+    import CompactStandardLibrary;
+    import GlobalStatesAndWitnesses prefix LedgerState_;
+    import CustomStructs prefix CustomStructs_;
+
+    /** Witnesses */
+    export witness getStakePrivateState(): CustomStructs_StakePrivateState;
+    export witness updateStakePrivateState(metadata: CustomStructs_StakePrivateState): [];
+    export witness divide(numerator: Uint<64>, denominator: Uint<64>): [Uint<64>, Uint<64>];
+    export witness secreteKey(): Bytes<32>;
+    export witness getCurrentTime(): Uint<64>;
+
+    export circuit mintNewToken(amount: Uint<64>): Bytes<32> {
+        const newTokenNonce = evolveNonce(LedgerState_mintCounter, LedgerState_nonce);
+
+        const mintResult = mintShieldedToken(
+            LedgerState_stAssetDomainSeparator,
+            amount,
+            newTokenNonce,
+            left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey())
+        );
+
+        LedgerState_mintCounter.increment(1);
+
+        LedgerState_totalAssetMinted = LedgerState_totalAssetMinted > 0 ? (LedgerState_totalAssetMinted as Uint<64>) + amount : amount;
+
+        return mintResult.color;
+    }
+
+    export circuit calculateMintCapacity(depositAmount: Uint<128>): Uint<64>{
+        if(LedgerState_totalAssetMinted == 0){
+            return depositAmount as Uint<64>; // Allow mint on a 1:1 ratio
+        }else{
+            const exchangeRatio = ScaledDivisionFunction((LedgerState_totalAssetMinted * LedgerState_SCALE_FACTOR) as Uint<64>, LedgerState_protocolTVL.value as Uint<64>);
+
+             const amountMintable = ScaledDivisionFunction((depositAmount * exchangeRatio) as Uint<64>, LedgerState_SCALE_FACTOR);
+
+             return amountMintable; // Allow mint based on underlying stake assset in the pool
+        }
+    }
+
+    export circuit ScaledDivisionFunction(numerator: Uint<64>, denominator: Uint<64>): Uint<64>{
+        assert (numerator > 0, "Invalid arithemetic operation");
+        const disclosedNumerator = disclose(numerator);
+        const disclosedDenominator = disclose(denominator);
+
+        const [quotient, remainder] = disclose(divide(disclosedNumerator, disclosedDenominator));
+
+        assert(remainder < denominator, "Invalid divsion results");
+        assert ((quotient * denominator) + remainder == numerator, "Invalid division results");
+
+        return quotient;
+    }
+
+    export circuit generatePrivateStateHash(metadata: CustomStructs_StakePrivateState, stakerId: Bytes<32>): Bytes<32>{
+        return persistentCommit<CustomStructs_StakePrivateState>(
+            metadata,
+            stakerId
+        );
+    }
+
+    export circuit generateStakerId(sk: Bytes<32>): Bytes<32>{
+        return persistentHash<Vector<3, Bytes<32>>>([
+               pad(32, "hydra:staker"),
+               sk,
+               kernel.self().bytes
+        ]);
+    }
+
+    export circuit recieveAndAddCoinToTvl(disclosedCoin: ShieldedCoinInfo): []{
+        receiveShielded(disclosedCoin);
+
+        /** Update the ledger balance */
+        const coinToInsert = LedgerState_protocolTVL.value > 0 ? 
+        mergeCoinImmediate(LedgerState_protocolTVL, disclosedCoin) :
+        disclosedCoin;
+
+        LedgerState_protocolTVL.writeCoin(
+            coinToInsert,
+            right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+        );
+    }
+
+    export circuit burnReturnedstAsset(coin: ShieldedCoinInfo):[] {
+        const disclosedCoin = disclose(coin);
+        assert (disclosedCoin.color == LedgerState_stAssetCoinColor, "Invalid coin type provided to cover transaction");
+        
+        receiveShielded(disclosedCoin);
+        /** Immediately burn */
+        sendImmediateShielded(coin, shieldedBurnAddress(), disclosedCoin.value);
+    }
+
+    export circuit sendAndManageChange(amount: Uint<128>, address: ZswapCoinPublicKey): []{
+        const disclosedAmt = disclose(amount);
+        /** Update the ledger balance */
+        const sendResult = sendShielded(LedgerState_protocolTVL, left<ZswapCoinPublicKey, ContractAddress>(address), disclosedAmt);
+        if(sendResult.change.is_some){
+            LedgerState_protocolTVL.writeCoin(
+                sendResult.change.value,
+                right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+            );
+        }else{
+            LedgerState_protocolTVL.resetToDefault();
+        }
+    }
+}

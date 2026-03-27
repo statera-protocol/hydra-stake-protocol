@@ -1,0 +1,10 @@
+@middleware_auth_token = 18e606502db9453a4ed12825c7069ddb6e405a8ca7038cc730eb7a9ef692431f
+POST http://localhost:8080/api/v1/stake
+Content-Type: application/json
+Authorization: Bearer {{middleware_auth_token}}
+
+{
+    "amount": "10000000",
+    "encAddress": "18e606502db9453a4ed12825c7069ddb6e405a8ca7038cc730eb7a9ef692431f",
+    "lock_until_epoch": "2"
+}

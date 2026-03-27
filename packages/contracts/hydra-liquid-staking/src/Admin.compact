@@ -1,0 +1,43 @@
+module Admin {
+    import CompactStandardLibrary;
+    import GlobalStatesAndWitnesses prefix LedgerState_;
+    import CustomStructs prefix CustomStructs_;
+    import Utils prefix Utils_;
+    /** ADMIN FUNCTIONALITIES */
+    /** Delegates protocol funds to third party  */
+    export circuit delegate(): []{
+        const userPk = ownPublicKey().bytes;
+        assert (userPk == LedgerState_superAdmin || LedgerState_admins.member(userPk), "Unauthorized to delegate protocol asset");
+        const delegationAmt = LedgerState_protocolTVL.value; //(TESTNING ONLY)
+        sendShielded(LedgerState_protocolTVL, right<ZswapCoinPublicKey, ContractAddress>(
+            ContractAddress {
+                bytes: LedgerState_delegationContractAddress
+            }
+        ), LedgerState_protocolTVL.value);
+
+        LedgerState_stakePoolStatus = CustomStructs_StakePoolStatus.delegated; 
+    }
+
+    /** Update admin access */
+    export circuit addNewAdmin(adminCpk: Bytes<32>): [] {
+        assert (ownPublicKey().bytes == LedgerState_superAdmin, "Unauthorized to add new admin");
+
+        LedgerState_admins.insert(disclose(adminCpk));
+    }
+
+    export circuit setTokenColor(): []{
+        const userPk = ownPublicKey().bytes;
+        assert ( userPk == LedgerState_superAdmin || LedgerState_admins.member(userPk), "Unauthorized to add new admin");
+        /** Construct the coin color minted to each user 
+        * Depend on the domain seperator specified
+        */
+        LedgerState_stAssetCoinColor = tokenType(LedgerState_stAssetDomainSeparator, kernel.self());
+    }
+
+    export circuit removeNewAdmin(adminCpk: Bytes<32>): [] {
+        assert (ownPublicKey().bytes == LedgerState_superAdmin, "Unauthorized to add new admin");
+
+        LedgerState_admins.remove(disclose(adminCpk));
+    }
+
+}

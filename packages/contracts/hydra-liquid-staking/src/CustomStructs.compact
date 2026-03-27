@@ -1,0 +1,21 @@
+module CustomStructs {
+    import CompactStandardLibrary;
+
+    /** Staker data types (Onchain and offchain) */
+    export enum StakeStatus {open, closed};
+    export enum StakePoolStatus {available, delegated};
+
+    export struct Stake {
+        staker_id: Bytes<32>;
+        stake_hash: Bytes<32>;
+        created_at: Uint<64>;
+        status: StakeStatus
+    }; 
+
+    export struct StakePrivateState {
+       stAssets_minted: Uint<64>;
+       deposit_amount: Uint<64>;
+       redeemable: Uint<64>;
+    } 
+
+}
