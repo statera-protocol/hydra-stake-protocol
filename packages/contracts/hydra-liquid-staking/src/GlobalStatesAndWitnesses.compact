@@ -1,0 +1,31 @@
+module GlobalStatesAndWitnesses{
+    import CompactStandardLibrary;
+    import CustomStructs prefix CustomStructs_;
+    /** Globally accessible ledger state */
+
+    export ledger totalAssetMinted: Uint<128>;
+    export ledger totalRewardsAccrued: Uint<128>;
+    export ledger totalStakeWithdrawn: Uint<128>; 
+
+    /** Tracks protocol coin I/O */
+    export ledger protocolTVL: QualifiedShieldedCoinInfo; // It's value reflect the total underlying assets
+    export ledger stakePoolStatus: CustomStructs_StakePoolStatus;
+
+    /** Record the entire stake entries */
+    export ledger stakings: Map<Bytes<32>, CustomStructs_Stake>; // Collection of all availabling stakes in the contract
+    export sealed ledger validAssetCoinType: Bytes<32>;
+    export sealed ledger superAdmin: Bytes<32>;
+    export ledger admins: Set<Bytes<32>>;
+    export ledger stAssetCoinColor: Bytes<32>;
+
+    /** Third party delegation contract address */ 
+    export sealed ledger delegationContractAddress: Bytes<32>; 
+    /** Minting params */
+    export ledger nonce: Bytes<32>;
+    export ledger mintCounter: Counter;
+    export sealed ledger stAssetDomainSeparator: Bytes<32>;
+
+
+    /** Enable token decimal representation */
+    export sealed ledger SCALE_FACTOR: Uint<32>; // 1_000_000 SUBUNITS PER UNIT ASSET
+}

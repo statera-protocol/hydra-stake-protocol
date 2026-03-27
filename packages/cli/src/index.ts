@@ -1,845 +1,467 @@
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
 import { stdin as input, stdout as output } from "node:process";
-import {
-  DeployedHydraStakeOnchainContract,
-  DerivedHydraStakeContractState,
-  HydraAPI,
-  HydraStakeContractProviders,
-  hydraStakePrivateStateId,
-  utils,
-} from "@hydra/hydra-stake-api";
-import { ContractAddress } from "@midnight-ntwrk/compact-runtime";
-import { createInterface, Interface } from "node:readline/promises";
+import { createInterface, type Interface } from "node:readline/promises";
+import { randomBytes as nodeRandomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import WebSocket from "ws";
 import { Logger } from "pino";
-import {
-  type Ledger,
-  ledger,
-  HydraStakePrivateState,
-  StakePoolStatus,
-} from "@hydra/hydra-stake-protocol";
-import {
-  parseCoinPublicKeyToHex,
-  toHex,
-} from "@midnight-ntwrk/midnight-js-utils";
-import { type Config, StandaloneConfig } from "./config.js";
-import {
-  getLedgerNetworkId,
-  getZswapNetworkId,
-} from "@midnight-ntwrk/midnight-js-network-id";
-import * as Rx from "rxjs";
-import { type Wallet } from "@midnight-ntwrk/wallet-api";
-import type {
-  StartedDockerComposeEnvironment,
-  DockerComposeEnvironment,
-} from "testcontainers";
-import { type Resource, WalletBuilder } from "@midnight-ntwrk/wallet";
-import { Transaction as ZswapTransaction } from "@midnight-ntwrk/zswap";
-import {
-  nativeToken,
-  Transaction,
-  type CoinInfo,
-  type TransactionId,
-} from "@midnight-ntwrk/ledger";
-import {
-  type MidnightProvider,
-  type WalletProvider,
-  type UnbalancedTransaction,
-  createBalancedTx,
-  type BalancedTransaction,
-  PrivateStateId,
-} from "@midnight-ntwrk/midnight-js-types";
-import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import type { DockerComposeEnvironment, StartedDockerComposeEnvironment } from "testcontainers";
+import { firstValueFrom } from "rxjs";
+import { DynamicContractAPI, utils } from "nite-api";
 import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
 import { httpClientProofProvider } from "@midnight-ntwrk/midnight-js-http-client-proof-provider";
-import * as fs from "node:fs";
-import { streamToString } from "testcontainers/build/common/streams.js";
-import { webcrypto } from "node:crypto";
+import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import { encodeTokenType, nativeToken } from "@midnight-ntwrk/ledger";
 
-/**
- * publicDataProvider is used because it allows us retrieve ledger state variables
- * @param providers provides us with all api to interact with midnight blockchain
- * enable us read or update the state of our smart contract
- * @param contractAddress the address of the intend smart contract we intend to retrieve the state of.
- * @returns the state of our smart contract
- */
-export const getHydraStakeLedgerState = (
-  providers: HydraStakeContractProviders,
-  contractAddress: ContractAddress
-): Promise<Ledger | null> =>
-  providers.publicDataProvider
-    .queryContractState(contractAddress)
-    .then((contractState) =>
-      contractState != null ? ledger(contractState.data) : null
+import { buildWallet, createWalletAndMidnightProvider } from "./wallet-utils.js";
+import { type Config, contractConfig } from "./config.js";
+import {
+  CIRCUIT_INTERACTION_CHOICE,
+  CONTRACT_SELECTION_QUESTION,
+  DEPLOY_OR_JOIN_QUESTION,
+  HEADER_BANNER,
+  LIQUID_STAKING_INTERACTION_CHOICE,
+} from "./userChoices.js";
+import { type WalletContext } from "./common-types.js";
+
+globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+
+type ContractKind = "night" | "liquid";
+
+type ContractDefinition = {
+  kind: ContractKind;
+  label: string;
+  compiledName: string;
+  distEntryPath: string;
+  zkConfigPath: string;
+  privateStateId: string;
+  privateStateStoreName: string;
+};
+
+type LoadedContract = {
+  definition: ContractDefinition;
+  module: any;
+};
+
+const CONTRACTS: Record<ContractKind, ContractDefinition> = {
+  night: {
+    kind: "night",
+    label: "Night Staking",
+    compiledName: "night-staking",
+    distEntryPath: contractConfig.nightStaking.distEntryPath,
+    zkConfigPath: contractConfig.nightStaking.zkConfigPath,
+    privateStateId: "night-staking-private-state",
+    privateStateStoreName: contractConfig.nightStaking.privateStateStoreName,
+  },
+  liquid: {
+    kind: "liquid",
+    label: "Hydra Liquid Staking",
+    compiledName: "hydra-stake-protocol",
+    distEntryPath: contractConfig.liquidStaking.distEntryPath,
+    zkConfigPath: contractConfig.liquidStaking.zkConfigPath,
+    privateStateId: "hydra-liquid-staking-private-state",
+    privateStateStoreName: contractConfig.liquidStaking.privateStateStoreName,
+  },
+};
+
+const randomBytes = (size: number): Uint8Array =>
+  new Uint8Array(nodeRandomBytes(size));
+
+const toHex = (value: Uint8Array): string => Buffer.from(value).toString("hex");
+
+const parseHexInput = (value: string, label: string): Uint8Array => {
+  const trimmed = value.trim().replace(/^0x/, "");
+  if (!/^[\da-fA-F]+$/.test(trimmed) || trimmed.length % 2 !== 0) {
+    throw new Error(`Invalid ${label}: "${value}"`);
+  }
+  return new Uint8Array(Buffer.from(trimmed, "hex"));
+};
+
+const parseUintInput = (value: string, label: string): bigint => {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(`Invalid ${label}: "${value}"`);
+  }
+  return BigInt(trimmed);
+};
+
+const parseDecimalAmountToScaled = (
+  value: string,
+  scaleFactor: bigint,
+  label: string,
+): bigint => {
+  const trimmed = value.trim();
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+    throw new Error(`Invalid ${label}: "${value}"`);
+  }
+
+  const [whole, fraction = ""] = trimmed.split(".");
+  const decimals = scaleFactor.toString().length - 1;
+  const paddedFraction = `${fraction}${"0".repeat(decimals)}`.slice(0, decimals);
+  return BigInt(whole) * scaleFactor + BigInt(paddedFraction || "0");
+};
+
+const formatValue = (value: unknown): unknown => {
+  if (typeof value === "bigint") return value.toString();
+  if (value instanceof Uint8Array) return toHex(value);
+  if (Array.isArray(value)) return value.map(formatValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, formatValue(v)]),
     );
+  }
+  return value;
+};
 
-const DEPLOY_OR_JOIN_QUESTION = `
-    You can do one of the following:
-    1. Deploy a hydra stake contract
-    2. Join an existing one
-    3. Exit
-`;
+const loadContract = async (definition: ContractDefinition): Promise<LoadedContract> => {
+  if (!existsSync(definition.distEntryPath)) {
+    throw new Error(
+      `${definition.label} build not found at ${definition.distEntryPath}. Build the contract package first.`,
+    );
+  }
 
-const resolve = async (
-  providers: HydraStakeContractProviders,
-  rli: Interface,
-  logger: Logger
-): Promise<HydraAPI | null> => {
-  let api: HydraAPI | null = null;
+  const module = await import(pathToFileURL(definition.distEntryPath).href);
+  return { definition, module };
+};
 
+const selectContract = async (rli: Interface): Promise<ContractDefinition | null> => {
   while (true) {
-    const choice = await rli.question(DEPLOY_OR_JOIN_QUESTION);
+    const choice = (await rli.question(CONTRACT_SELECTION_QUESTION)).trim();
     switch (choice) {
       case "1":
-        api = await HydraAPI.deployHydraStakeContract(providers, {
-          mintDomain: await rli.question("Specify token domain seperator"),
-          deleglationContractAddress: await rli.question("Specify delegate contract address"),
-          scaleFactor: BigInt(Number(await rli.question("Specify token scale factor")))
-        }, logger);
-        logger.info(
-          `Deployed contract at address: ${api.deployedContractAddress}`
-        );
-        return api;
-
+        return CONTRACTS.night;
       case "2":
-        api = await HydraAPI.joinHydraStakeContract(
-          providers,
-          await rli.question("What is the contract address (in hex)?"),
-          logger
-        );
-        logger.info(
-          `Joined contract at address: ${api.deployedContractAddress}`
-        );
-        return api;
-    }
-  }
-};
-
-const displayLedgerState = async (
-  providers: HydraStakeContractProviders,
-  deployedStateraContract: DeployedHydraStakeOnchainContract,
-  logger: Logger
-): Promise<void> => {
-  const contractAddress =
-    deployedStateraContract.deployTxData.public.contractAddress;
-  const ledgerState = await getHydraStakeLedgerState(providers, contractAddress);
-  if (ledgerState === null) {
-    logger.info(
-      `There is no token mint contract deployed at ${contractAddress}`
-    );
-  } else {
-    console.log(
-      `Current admins: ${ledgerState.admins}`
-    );
-    console.log(
-      `Current stake pool amount is:`,
-      ledgerState.protocolTVL
-    );
-    console.log(`Current total value minted is:`, ledgerState.total_stAsset_Minted);
-    console.log(`Current staker:`, ledgerState.stakings);
-    console.log(`Current stake pool status:`, ledgerState.stakePoolStatus == StakePoolStatus.available ? "AVAILABLE" : "DELEGATED");
-    console.log(`Current mint token color is:`, ledgerState.stAssetCoinColor);
-    console.log(`Current valid asset color is:`, ledgerState.validAssetCoinType);
-    console.log(`Current token scaleFactor is:`, ledgerState.SCALE_FACTOR);
-    console.log(`Current third party contract address is:`, ledgerState.delegationContractAddress);
-  }
-};
-
-const displayDerivedLedgerState = async (
-  currentState: DerivedHydraStakeContractState,
-  logger: Logger
-): Promise<void> => {
-  logger.info(
-    `Current admins: ${currentState.admins}`
-  );
-  console.log(
-    `Current stake pool amount is:`,
-    currentState.protocolTVL
-  );
-  console.log(`Current total value minted is:`, currentState.totalMint);
-  console.log(`Current staker:`, currentState.stakings);
-  console.log(`Current stake pool status:`, currentState.stakePoolStatus == StakePoolStatus.available ? "AVAILABLE" : "DELEGATED");
-  console.log(`Current mint token color is:`, currentState.mintTokenColor);
-  console.log(`Current valid asset color is:`, currentState.validAssetCoinType);
-  console.log(`Current token scaleFactor is:`, currentState.scaleFactor);
-  console.log(`Current third party contract address is:`, currentState.delegationContractAddress);
-};
-
-const getUserPrivateState = async (
-  providers: HydraStakeContractProviders
-): Promise<HydraStakePrivateState | null> =>
-  providers.privateStateProvider
-    .get(hydraStakePrivateStateId)
-    .then((privateState) => (privateState != null ? privateState : null));
-
-const displayUserPrivateState = async (
-  providers: HydraStakeContractProviders,
-  logger: Logger
-) => {
-  const privateState = await getUserPrivateState(providers);
-
-  if (privateState === null)
-    logger.info(`There is no private state stored at ${hydraStakePrivateStateId}`);
-  console.log(`Current collateral reserved is:`, privateState?.stakeMetadata);
-  logger.info(`Current secrete-key is: ${privateState?.secretKey}`);
-};
-
-// Updated menu with new option
-const CIRCUIT_MAIN_LOOP_QUESTION = `
-You can do one of the following:
-  1. Display ledger state
-  2. Display derived ledger state
-  3. Display user private state
-  4. Display comprehensive wallet state
-  5. Set coin color
-  6. Stake Asset
-  7. Redeem
-  8. Delegating token to third party
-  9. Exit
-
-Which would you like to do? `;
-
-const circuit_main_loop = async (
-  wallet: Wallet & Resource,
-  providers: HydraStakeContractProviders,
-  rli: Interface,
-  logger: Logger
-): Promise<void> => {
-  const hydraDeployedApi = await resolve(providers, rli, logger);
-  if (hydraDeployedApi === null) return;
-
-  let currentState: DerivedHydraStakeContractState | undefined;
-  const stateObserver = {
-    next: (state: DerivedHydraStakeContractState) => {
-      currentState = state;
-    },
-  };
-
-  const subscription = hydraDeployedApi.state.subscribe(stateObserver);
-
-  try {
-    while (true) {
-      const choice = await rli.question(CIRCUIT_MAIN_LOOP_QUESTION);
-      switch (choice) {
-
-        case "1": {
-          await displayLedgerState(
-            providers,
-            hydraDeployedApi.allReadyDeployedContract,
-            logger
-          );
-          break;
-        }
-        case "2": {
-          await displayDerivedLedgerState(
-            currentState as DerivedHydraStakeContractState,
-            logger
-          );
-          break;
-        }
-        case "3": {
-          await displayUserPrivateState(providers, logger);
-          break;
-        }
-        case "4": {
-          // New option to manually check wallet state
-          await displayComprehensiveWalletState(wallet, currentState, logger);
-          break;
-        }
-        case "5": {
-          // New option to manually check wallet state
-          logger.info("Setting mint token color...");
-          await hydraDeployedApi.setMintTokenColor();
-          logger.info(
-            "Waiting for wallet to sync after setting mint token color..."
-          );
-          await waitForWalletSyncAfterOperation(wallet, logger);
-          await displayComprehensiveWalletState(wallet, currentState, logger);
-          break;
-        }
-
-        case "6": {
-          // New option to manually check wallet state
-          logger.info("Staking token to pool...");
-          await hydraDeployedApi?.stake(
-            Number(await rli.question("Enter stake amount: "))
-          );
-          logger.info(
-            "Waiting for wallet to sync after staking..."
-          );
-          await waitForWalletSyncAfterOperation(wallet, logger);
-          await displayComprehensiveWalletState(wallet, currentState, logger);
-          break;
-        }
-
-        case "7": {
-          // New option to manually check wallet state
-          logger.info("Redeeming token from pool...");
-          await hydraDeployedApi?.redeem(
-            Number(await rli.question("Enter stake amount to redeem: "))
-          );
-          logger.info(
-            "Waiting for wallet to sync after redeeming..."
-          );
-          await waitForWalletSyncAfterOperation(wallet, logger);
-          await displayComprehensiveWalletState(wallet, currentState, logger);
-          break;
-        }
-
-        case "8": {
-          // New option to manually check wallet state
-          logger.info("Delegating token to third party...");
-          await hydraDeployedApi?.delegate();
-          logger.info(
-            "Waiting for wallet to sync after redeeming..."
-          );
-          await waitForWalletSyncAfterOperation(wallet, logger);
-          await displayComprehensiveWalletState(wallet, currentState, logger);
-          break;
-        }
-
-        case "9": {
-          logger.info("Exiting.......");
-          return;
-        }
-        default:
-          logger.error(`Invalid choice: ${choice}`);
-      }
-    }
-  } finally {
-    subscription.unsubscribe();
-  }
-};
-
-export const createWalletAndMidnightProvider = async (
-  wallet: Wallet
-): Promise<WalletProvider & MidnightProvider> => {
-  const state = await Rx.firstValueFrom(wallet.state());
-  return {
-    coinPublicKey: state.coinPublicKey,
-    encryptionPublicKey: state.encryptionPublicKey,
-    balanceTx(
-      tx: UnbalancedTransaction,
-      newCoins: CoinInfo[]
-    ): Promise<BalancedTransaction> {
-      return wallet
-        .balanceTransaction(
-          ZswapTransaction.deserialize(
-            tx.serialize(getLedgerNetworkId()),
-            getZswapNetworkId()
-          ),
-          newCoins
-        )
-        .then((tx) => wallet.proveTransaction(tx))
-        .then((zswapTx) =>
-          Transaction.deserialize(
-            zswapTx.serialize(getZswapNetworkId()),
-            getLedgerNetworkId()
-          )
-        )
-        .then(createBalancedTx);
-    },
-    submitTx(tx: BalancedTransaction): Promise<TransactionId> {
-      return wallet.submitTransaction(tx);
-    },
-  };
-};
-
-export const waitForSync = (wallet: Wallet, logger: Logger) =>
-  Rx.firstValueFrom(
-    wallet.state().pipe(
-      Rx.throttleTime(5_000),
-      Rx.tap((state) => {
-        const applyGap = state.syncProgress?.lag.applyGap ?? 0n;
-        const sourceGap = state.syncProgress?.lag.sourceGap ?? 0n;
-        logger.info(
-          `Waiting for funds. Backend lag: ${sourceGap}, wallet lag: ${applyGap}, transactions=${state.transactionHistory.length}`
-        );
-      }),
-      Rx.filter((state) => {
-        // Let's allow progress only if wallet is synced fully
-        return state.syncProgress !== undefined && state.syncProgress.synced;
-      })
-    )
-  );
-
-export const waitForSyncProgress = async (wallet: Wallet, logger: Logger) =>
-  await Rx.firstValueFrom(
-    wallet.state().pipe(
-      Rx.throttleTime(5_000),
-      Rx.tap((state) => {
-        const applyGap = state.syncProgress?.lag.applyGap ?? 0n;
-        const sourceGap = state.syncProgress?.lag.sourceGap ?? 0n;
-        logger.info(
-          `Waiting for funds. Backend lag: ${sourceGap}, wallet lag: ${applyGap}, transactions=${state.transactionHistory.length}`
-        );
-      }),
-      Rx.filter((state) => {
-        // Let's allow progress only if syncProgress is defined
-        return state.syncProgress !== undefined;
-      })
-    )
-  );
-
-export const waitForFunds = (wallet: Wallet, logger: Logger) =>
-  Rx.firstValueFrom(
-    wallet.state().pipe(
-      Rx.throttleTime(10_000),
-      Rx.tap((state) => {
-        const applyGap = state.syncProgress?.lag.applyGap ?? 0n;
-        const sourceGap = state.syncProgress?.lag.sourceGap ?? 0n;
-        logger.info(
-          `Waiting for funds. Backend lag: ${sourceGap}, wallet lag: ${applyGap}, transactions=${state.transactionHistory.length}`
-        );
-      }),
-      Rx.filter((state) => {
-        // Let's allow progress only if wallet is synced
-        return state.syncProgress?.synced === true;
-      }),
-      Rx.map((s) => s.balances[nativeToken()] ?? 0n),
-      Rx.filter((balance) => balance > 0n)
-    )
-  );
-
-export const isAnotherChain = async (
-  wallet: Wallet,
-  offset: number,
-  logger: Logger
-) => {
-  await waitForSyncProgress(wallet, logger);
-  // Here wallet does not expose the offset block it is synced to, that is why this workaround
-  const walletOffset = Number(JSON.parse(await wallet.serializeState()).offset);
-  if (walletOffset < offset - 1) {
-    logger.info(
-      `Your offset offset is: ${walletOffset} restored offset: ${offset} so it is another chain`
-    );
-    return true;
-  } else {
-    logger.info(
-      `Your offset offset is: ${walletOffset} restored offset: ${offset} ok`
-    );
-    return false;
-  }
-};
-
-export const waitForTokenBalance = (
-  wallet: Wallet,
-  tokenType: string,
-  minimumAmount: bigint,
-  logger: Logger,
-  timeoutMs: number = 30000
-): Promise<bigint> =>
-  Rx.firstValueFrom(
-    wallet.state().pipe(
-      Rx.throttleTime(2_000),
-      Rx.tap((state) => {
-        const balance = state.balances[tokenType] ?? 0n;
-        const applyGap = state.syncProgress?.lag.applyGap ?? 0n;
-        const sourceGap = state.syncProgress?.lag.sourceGap ?? 0n;
-        logger.info(
-          `Waiting for ${tokenType} balance. Current: ${balance}, Target: ${minimumAmount}, Backend lag: ${sourceGap}, Wallet lag: ${applyGap}`
-        );
-      }),
-      Rx.filter((state) => {
-        const balance = state.balances[tokenType] ?? 0n;
-        return state.syncProgress?.synced === true && balance >= minimumAmount;
-      }),
-      Rx.map((state) => state.balances[tokenType] ?? 0n),
-      Rx.timeout(timeoutMs)
-    )
-  );
-
-// Enhanced function to wait for wallet sync after operations
-export const waitForWalletSyncAfterOperation = async (
-  wallet: Wallet,
-  logger: Logger,
-  timeoutMs: number = 30000
-): Promise<void> => {
-  try {
-    await Rx.firstValueFrom(
-      wallet.state().pipe(
-        Rx.throttleTime(1_000),
-        Rx.tap((state) => {
-          const applyGap = state.syncProgress?.lag.applyGap ?? 0n;
-          const sourceGap = state.syncProgress?.lag.sourceGap ?? 0n;
-          logger.info(
-            `Syncing after operation. Backend lag: ${sourceGap}, Wallet lag: ${applyGap}`
-          );
-        }),
-        Rx.filter((state) => {
-          return state.syncProgress?.synced === true;
-        }),
-        Rx.timeout(timeoutMs)
-      )
-    );
-    logger.info("Wallet sync completed after operation");
-  } catch (error) {
-    logger.warn(`Wallet sync timeout after ${timeoutMs}ms`);
-  }
-};
-
-// Function to display comprehensive wallet state including all token types
-const displayComprehensiveWalletState = async (
-  wallet: Wallet,
-  currentContractState: DerivedHydraStakeContractState | undefined,
-  logger: Logger
-): Promise<void> => {
-  const state = await Rx.firstValueFrom(wallet.state());
-
-  logger.info("=== WALLET STATE ===");
-  logger.info(`Address: ${state.address}`);
-  logger.info(
-    `Sync Status: ${state.syncProgress?.synced ? "SYNCED" : "SYNCING"}`
-  );
-
-  if (state.syncProgress) {
-    logger.info(`Apply Gap: ${state.syncProgress.lag.applyGap}`);
-    logger.info(`Source Gap: ${state.syncProgress.lag.sourceGap}`);
-  }
-
-  logger.info("=== TOKEN BALANCES ===");
-  Object.entries(state.balances).forEach(([tokenType, balance]) => {
-    if (tokenType === nativeToken()) {
-      logger.info(`Native Token (tDUST): ${balance}`);
-    } else {
-      logger.info(`Token ${tokenType}: ${balance}`);
-    }
-  });
-
-  logger.info(`Transaction History Count: ${state.transactionHistory.length}`);
-  logger.info("===================");
-};
-
-export const buildEnhancedWalletAndWaitForFunds = async (
-  config: Config,
-  seed: string,
-  filename: string,
-  logger: Logger
-): Promise<Wallet & Resource> => {
-  // ... (keep existing wallet building logic)
-  const wallet = await buildWalletAndWaitForFunds(
-    config,
-    seed,
-    filename,
-    logger
-  );
-
-  // Set up continuous state monitoring
-  const stateSubscription = wallet
-    .state()
-    .pipe(Rx.throttleTime(60_000))
-    .subscribe({
-      next: (state) => {
-        logger.info("Wallet state changed - balances updated");
-        Object.entries(state.balances).forEach(([tokenType, balance]) => {
-          if (balance > 0n) {
-            logger.info(`${tokenType}: ${balance}`);
-          }
-        });
-      },
-    });
-
-  // Store subscription reference for cleanup
-  (wallet as any).__stateSubscription = stateSubscription;
-
-  return wallet;
-};
-
-export const buildWalletAndWaitForFunds = async (
-  { indexer, indexerWS, node, proofServer }: Config,
-  seed: string,
-  filename: string,
-  logger: Logger
-): Promise<Wallet & Resource> => {
-  const directoryPath = process.env.SYNC_CACHE;
-  let wallet: Wallet & Resource;
-  if (directoryPath !== undefined) {
-    if (fs.existsSync(`${directoryPath}/${filename}`)) {
-      logger.info(
-        `Attempting to restore state from ${directoryPath}/${filename}`
-      );
-      try {
-        const serializedStream = fs.createReadStream(
-          `${directoryPath}/${filename}`,
-          "utf-8"
-        );
-        const serialized = await streamToString(serializedStream);
-        serializedStream.on("finish", () => {
-          serializedStream.close();
-        });
-        wallet = await WalletBuilder.restore(
-          indexer,
-          indexerWS,
-          proofServer,
-          node,
-          seed,
-          serialized,
-          "info"
-        );
-        wallet.start();
-        const stateObject = JSON.parse(serialized);
-        if (
-          (await isAnotherChain(wallet, Number(stateObject.offset), logger)) ===
-          true
-        ) {
-          logger.warn("The chain was reset, building wallet from scratch");
-          wallet = await WalletBuilder.build(
-            indexer,
-            indexerWS,
-            proofServer,
-            node,
-            seed,
-            getZswapNetworkId(),
-            "info"
-          );
-          wallet.start();
-        } else {
-          const newState = await waitForSync(wallet, logger);
-          // allow for situations when there's no new index in the network between runs
-          if (newState.syncProgress?.synced) {
-            logger.info("Wallet was able to sync from restored state");
-          } else {
-            logger.info(`Offset: ${stateObject.offset}`);
-            logger.info(
-              `SyncProgress.lag.applyGap: ${newState.syncProgress?.lag.applyGap}`
-            );
-            logger.info(
-              `SyncProgress.lag.sourceGap: ${newState.syncProgress?.lag.sourceGap}`
-            );
-            logger.warn(
-              "Wallet was not able to sync from restored state, building wallet from scratch"
-            );
-            wallet = await WalletBuilder.build(
-              indexer,
-              indexerWS,
-              proofServer,
-              node,
-              seed,
-              getZswapNetworkId(),
-              "info"
-            );
-            wallet.start();
-          }
-        }
-      } catch (error: unknown) {
-        if (typeof error === "string") {
-          logger.error(error);
-        } else if (error instanceof Error) {
-          logger.error(error.message);
-        } else {
-          logger.error(error);
-        }
-        logger.warn(
-          "Wallet was not able to restore using the stored state, building wallet from scratch"
-        );
-        wallet = await WalletBuilder.build(
-          indexer,
-          indexerWS,
-          proofServer,
-          node,
-          seed,
-          getZswapNetworkId(),
-          "info"
-        );
-        wallet.start();
-      }
-    } else {
-      logger.info("Wallet save file not found, building wallet from scratch");
-      wallet = await WalletBuilder.build(
-        indexer,
-        indexerWS,
-        proofServer,
-        node,
-        seed,
-        getZswapNetworkId(),
-        "info"
-      );
-      wallet.start();
-    }
-  } else {
-    logger.info(
-      "File path for save file not found, building wallet from scratch"
-    );
-    wallet = await WalletBuilder.build(
-      indexer,
-      indexerWS,
-      proofServer,
-      node,
-      seed,
-      getZswapNetworkId(),
-      "info"
-    );
-    wallet.start();
-  }
-
-  const state = await Rx.firstValueFrom(wallet.state());
-  logger.info(`Your wallet seed is: ${seed}`);
-  logger.info(`Your wallet address is: ${state.address}`);
-  let balance = state.balances[nativeToken()];
-  if (balance === undefined || balance === 0n) {
-    logger.info(`Your wallet balance is: 0`);
-    logger.info(`Waiting to receive tokens...`);
-    balance = await waitForFunds(wallet, logger);
-  }
-  logger.info(`Your wallet balance is: ${balance}`);
-  return wallet;
-};
-
-export const randomBytes = (length: number): Uint8Array => {
-  const bytes = new Uint8Array(length);
-  webcrypto.getRandomValues(bytes);
-  return bytes;
-};
-
-// Generate a random see and create the wallet with that.
-export const buildFreshWallet = async (
-  config: Config,
-  logger: Logger
-): Promise<Wallet & Resource> =>
-  await buildWalletAndWaitForFunds(config, toHex(randomBytes(32)), "", logger);
-
-// Prompt for a seed and create the wallet with that.
-const buildWalletFromSeed = async (
-  config: Config,
-  rli: Interface,
-  logger: Logger
-): Promise<Wallet & Resource> => {
-  const seed = await rli.question("Enter your wallet seed: ");
-  return await buildWalletAndWaitForFunds(config, seed, "", logger);
-};
-
-/* ***********************************************************************
- * This seed gives access to tokens minted in the genesis block of a local development node - only
- * used in standalone networks to build a wallet with initial funds.
- */
-const GENESIS_MINT_WALLET_SEED =
-  "0000000000000000000000000000000000000000000000000000000000000001";
-
-const WALLET_LOOP_QUESTION = `
-You can do one of the following:
-  1. Build a fresh wallet
-  2. Build wallet from a seed
-  3. Exit
-Which would you like to do? `;
-
-const buildWallet = async (
-  config: Config,
-  rli: Interface,
-  logger: Logger
-): Promise<(Wallet & Resource) | null> => {
-  if (config instanceof StandaloneConfig) {
-    return await buildWalletAndWaitForFunds(
-      config,
-      GENESIS_MINT_WALLET_SEED,
-      "",
-      logger
-    );
-  }
-  while (true) {
-    const choice = await rli.question(WALLET_LOOP_QUESTION);
-    switch (choice) {
-      case "1":
-        return await buildFreshWallet(config, logger);
-      case "2":
-        return await buildWalletFromSeed(config, rli, logger);
+        return CONTRACTS.liquid;
       case "3":
-        logger.info("Exiting...");
         return null;
       default:
-        logger.error(`Invalid choice: ${choice}`);
+        console.log("Invalid option. Select 1, 2, or 3.");
     }
   }
+};
+
+const displayPublicState = async (api: any): Promise<any> => {
+  const [publicState] = await firstValueFrom(api.contractState as any) as [any, any];
+  return publicState;
+};
+
+const displayPrivateState = async (api: any): Promise<any> => {
+  const [, privateState] = await firstValueFrom(api.contractState as any) as [any, any];
+  return privateState;
+};
+
+const printNightLedger = (contractModule: any, publicState: any) => {
+  const ledgerState = contractModule.ledger(publicState.data);
+  console.dir(
+    {
+      epochDuration: ledgerState.EPOCH_DURATION?.toString(),
+      startTime: ledgerState.START_TIME?.toString(),
+      currentEpoch: ledgerState.currentEpoch?.toString(),
+      adminSignature: formatValue(ledgerState.adminSignature),
+      stakes: {
+        firstFree: ledgerState.stakes?.firstFree?.()?.toString?.(),
+        root: formatValue(ledgerState.stakes?.root?.()),
+        isFull: ledgerState.stakes?.isFull?.(),
+      },
+    },
+    { depth: null, colors: true },
+  );
+};
+
+const printLiquidLedger = (contractModule: any, publicState: any) => {
+  const ledgerState = contractModule.ledger(publicState.data);
+  console.dir(formatValue(ledgerState), { depth: null, colors: true });
+};
+
+const buildProviders = async (
+  ctx: WalletContext,
+  config: Config,
+  definition: ContractDefinition,
+) => {
+  const walletAndMidnightProvider = await createWalletAndMidnightProvider(ctx, config);
+  const zkConfigProvider = new NodeZkConfigProvider(definition.zkConfigPath);
+
+  return {
+    privateStateProvider: levelPrivateStateProvider({
+      privateStateStoreName: definition.privateStateStoreName,
+      privateStoragePasswordProvider: () =>
+        `${ctx.unshieldedKeystore.getBech32Address().toString()}::midnight-private-state-password`,
+      accountId: ctx.unshieldedKeystore.getBech32Address().toString(),
+    }),
+    publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),
+    zkConfigProvider,
+    proofProvider: httpClientProofProvider(config.proofServer, zkConfigProvider),
+    walletProvider: walletAndMidnightProvider,
+    midnightProvider: walletAndMidnightProvider,
+  };
+};
+
+const resolveContractApi = async (
+  loaded: LoadedContract,
+  providers: any,
+  rli: Interface,
+  logger: Logger,
+) => {
+  while (true) {
+    const choice = (await rli.question(DEPLOY_OR_JOIN_QUESTION)).trim();
+    const compiledContract = utils.createCompiledContract(
+      loaded.definition.compiledName,
+      loaded.module.Contract,
+      loaded.module.witnesses,
+      loaded.definition.zkConfigPath,
+    );
+    const initialPrivateState = loaded.definition.kind === "night"
+      ? loaded.module.createNightStakingPrivateState(randomBytes(32))
+      : loaded.module.createHydraStakePrivateState(randomBytes(32));
+
+    switch (choice) {
+      case "1":
+        return DynamicContractAPI.deploy({
+          providers,
+          compiledContract,
+          initialPrivateState,
+          privateStateId: loaded.definition.privateStateId,
+          logger: logger as any,
+        });
+      case "2": {
+        const contractAddress = (await rli.question("Please enter the contract address: ")).trim();
+        return DynamicContractAPI.join({
+          providers,
+          compiledContract,
+          initialPrivateState,
+          privateStateId: loaded.definition.privateStateId,
+          contractAddress,
+          logger: logger as any,
+        });
+      }
+      case "3":
+        return null;
+      default:
+        console.log("Invalid option. Select 1, 2, or 3.");
+    }
+  }
+};
+
+const callTx = async (api: any, circuitName: string, ...args: unknown[]) =>
+  (api.callTx as any)(circuitName, ...args);
+
+const promptNightStake = async (api: any, rli: Interface) => {
+  const amount = parseUintInput(await rli.question("Enter stake amount (Uint64): "), "stake amount");
+  const lockUntilEpoch = parseUintInput(
+    await rli.question("Enter lock-until epoch (Uint64): "),
+    "lock-until epoch",
+  );
+  const encAddress = randomBytes(32);
+  console.log(`Generated encrypted address: ${toHex(encAddress)}`);
+  await callTx(api, "stake", amount, lockUntilEpoch, encAddress);
+};
+
+const promptNightClaim = async (api: any, rli: Interface) => {
+  const encAddress = parseHexInput(
+    await rli.question("Enter the encrypted address used for staking: "),
+    "encrypted address",
+  );
+  await callTx(api, "claim", encAddress);
+};
+
+const getLiquidLedgerState = async (contractModule: any, api: any) => {
+  const [publicState] = await firstValueFrom(api.contractState as any) as [any, any];
+  return contractModule.ledger(publicState.data);
+};
+
+const promptLiquidStake = async (contractModule: any, api: any, rli: Interface) => {
+  const ledgerState = await getLiquidLedgerState(contractModule, api);
+  const value = parseDecimalAmountToScaled(
+    await rli.question("Enter stake amount: "),
+    BigInt(ledgerState.SCALE_FACTOR),
+    "stake amount",
+  );
+  await callTx(api, "stake", {
+    color: encodeTokenType(nativeToken()),
+    nonce: randomBytes(32),
+    value,
+  });
+};
+
+const promptLiquidRedeem = async (contractModule: any, api: any, rli: Interface) => {
+  const ledgerState = await getLiquidLedgerState(contractModule, api);
+  const value = parseDecimalAmountToScaled(
+    await rli.question("Enter stAsset amount to redeem: "),
+    BigInt(ledgerState.SCALE_FACTOR),
+    "redeem amount",
+  );
+  await callTx(api, "redeem", {
+    color: ledgerState.stAssetCoinColor,
+    nonce: randomBytes(32),
+    value,
+  });
+};
+
+const promptLiquidReward = async (contractModule: any, api: any, rli: Interface) => {
+  const ledgerState = await getLiquidLedgerState(contractModule, api);
+  const value = parseDecimalAmountToScaled(
+    await rli.question("Enter delegate reward amount: "),
+    BigInt(ledgerState.SCALE_FACTOR),
+    "delegate reward amount",
+  );
+  await callTx(api, "recieveDelegateReward", {
+    color: encodeTokenType(nativeToken()),
+    nonce: randomBytes(32),
+    value,
+  });
+};
+
+const runNightLoop = async (loaded: LoadedContract, api: any, rli: Interface) => {
+  while (true) {
+    const choice = (await rli.question(CIRCUIT_INTERACTION_CHOICE)).trim();
+    try {
+      switch (choice) {
+        case "1":
+          await promptNightStake(api, rli);
+          break;
+        case "2":
+          await promptNightClaim(api, rli);
+          break;
+        case "3":
+          printNightLedger(loaded.module, await displayPublicState(api));
+          continue;
+        case "4":
+          console.dir(formatValue(await displayPrivateState(api)), { depth: null, colors: true });
+          continue;
+        case "5":
+          return;
+        default:
+          console.log("Invalid option. Select 1 to 5.");
+          continue;
+      }
+      printNightLedger(loaded.module, await displayPublicState(api));
+    } catch (error) {
+      console.error(error);
+    } finally {
+      rli.resume();
+    }
+  }
+};
+
+const runLiquidLoop = async (loaded: LoadedContract, api: any, rli: Interface) => {
+  while (true) {
+    const choice = (await rli.question(LIQUID_STAKING_INTERACTION_CHOICE)).trim();
+    try {
+      switch (choice) {
+        case "1":
+          await promptLiquidStake(loaded.module, api, rli);
+          break;
+        case "2":
+          await promptLiquidRedeem(loaded.module, api, rli);
+          break;
+        case "3":
+          await callTx(api, "delegate");
+          break;
+        case "4":
+          await promptLiquidReward(loaded.module, api, rli);
+          break;
+        case "5":
+          await callTx(api, "setTokenColor");
+          break;
+        case "6":
+          printLiquidLedger(loaded.module, await displayPublicState(api));
+          continue;
+        case "7":
+          console.dir(formatValue(await displayPrivateState(api)), { depth: null, colors: true });
+          continue;
+        case "8":
+          return;
+        default:
+          console.log("Invalid option. Select 1 to 8.");
+          continue;
+      }
+      printLiquidLedger(loaded.module, await displayPublicState(api));
+    } catch (error) {
+      console.error(error);
+    } finally {
+      rli.resume();
+    }
+  }
+};
+
+const runContractInteractionLoop = async (
+  walletCtx: WalletContext,
+  config: Config,
+  rli: Interface,
+  logger: Logger,
+) => {
+  const definition = await selectContract(rli);
+  if (definition == null) return;
+
+  const loaded = await loadContract(definition);
+  const providers = await buildProviders(walletCtx, config, definition);
+  const api = await resolveContractApi(loaded, providers, rli, logger);
+  if (api == null) return;
+
+  if (definition.kind === "night") {
+    printNightLedger(loaded.module, await displayPublicState(api));
+    await runNightLoop(loaded, api, rli);
+    return;
+  }
+
+  printLiquidLedger(loaded.module, await displayPublicState(api));
+  await runLiquidLoop(loaded, api, rli);
 };
 
 const mapContainerPort = (
   env: StartedDockerComposeEnvironment,
   url: string,
-  containerName: string
+  containerNames: string[],
 ) => {
   const mappedUrl = new URL(url);
-  const container = env.getContainer(containerName);
+  let container: ReturnType<StartedDockerComposeEnvironment["getContainer"]> | undefined;
+
+  for (const name of containerNames) {
+    try {
+      container = env.getContainer(name);
+      break;
+    } catch {}
+  }
+
+  if (container === undefined) {
+    throw new Error(`Failed to resolve running container from [${containerNames.join(", ")}]`);
+  }
 
   mappedUrl.port = String(container.getFirstMappedPort());
-
   return mappedUrl.toString().replace(/\/+$/, "");
 };
 
 export const run = async (
   config: Config,
   logger: Logger,
-  dockerEnv?: DockerComposeEnvironment
+  dockerEnv?: DockerComposeEnvironment,
 ): Promise<void> => {
   const rli = createInterface({ input, output, terminal: true });
-  let env;
-  if (dockerEnv !== undefined) {
-    env = await dockerEnv.up();
+  let env: StartedDockerComposeEnvironment | undefined;
 
-    if (config instanceof StandaloneConfig) {
-      config.indexer = mapContainerPort(
-        env,
-        config.indexer,
-        "manual-statera-indexer"
-      );
-      config.indexerWS = mapContainerPort(
-        env,
-        config.indexerWS,
-        "manual-statera-indexer"
-      );
-      config.node = mapContainerPort(env, config.node, "manual-statera-node");
-      config.proofServer = mapContainerPort(
-        env,
-        config.proofServer,
-        "manual-statera-proof-server"
-      );
-    }
-  }
-  const wallet = await buildWallet(config, rli, logger);
   try {
-    if (wallet !== null) {
-      const walletAndMidnightProvider =
-        await createWalletAndMidnightProvider(wallet);
-      const providers = {
-        privateStateProvider: levelPrivateStateProvider<PrivateStateId>({
-          privateStateStoreName: config.privateStateStoreName as string,
-        }),
-        publicDataProvider: indexerPublicDataProvider(
-          config.indexer,
-          config.indexerWS
-        ),
-        zkConfigProvider: new NodeZkConfigProvider<never>(config.zkConfigPath),
-        proofProvider: httpClientProofProvider(config.proofServer),
-        walletProvider: walletAndMidnightProvider,
-        midnightProvider: walletAndMidnightProvider,
-      };
-      await circuit_main_loop(wallet, providers, rli, logger);
+    if (dockerEnv !== undefined) {
+      env = await dockerEnv.up();
+      config.indexer = mapContainerPort(env, config.indexer, ["indexer", "indexer-1"]);
+      config.indexerWS = mapContainerPort(env, config.indexerWS, ["indexer", "indexer-1"]);
+      config.node = mapContainerPort(env, config.node, ["node", "node-1"]);
+      config.proofServer = mapContainerPort(env, config.proofServer, ["proof-server", "proof-server-1"]);
     }
-  } catch (e) {
-    if (e instanceof Error) {
-      logger.error(`Found error '${e.message}'`);
-      logger.info("Exiting...");
-      logger.debug(`${e.stack}`);
-    } else {
-      throw e;
+
+    console.log(HEADER_BANNER);
+    const walletCtx = await buildWallet(config, rli);
+    if (walletCtx == null) return;
+
+    while (true) {
+      await runContractInteractionLoop(walletCtx, config, rli, logger);
+      const again = (await rli.question("Select another contract? [y/N]: ")).trim().toLowerCase();
+      if (again !== "y") break;
     }
   } finally {
-    try {
-      rli.close();
-      rli.removeAllListeners();
-    } catch (e) {
-    } finally {
-      try {
-        if (wallet !== null) {
-          await wallet.close();
-        }
-      } catch (e) {
-      } finally {
-        try {
-          if (env !== undefined) {
-            await env.down();
-            logger.info("Goodbye");
-            process.exit(0);
-          }
-        } catch (e) { }
-      }
+    rli.close();
+    if (env !== undefined) {
+      await env.down();
     }
   }
 };

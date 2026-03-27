@@ -1,0 +1,149 @@
+pragma language_version >= 0.22.0;
+
+import CompactStandardLibrary;
+import GlobalStatesAndWitnesses;
+import Utils prefix Utils_;
+import Admin prefix Admin_;
+import CustomStructs prefix CustomStructs_;
+
+export {
+     protocolTVL, totalRewardsAccrued, totalStakeWithdrawn, totalAssetMinted,
+     validAssetCoinType, CustomStructs_StakePrivateState, CustomStructs_Stake, CustomStructs_StakeStatus, stakings,
+     QualifiedShieldedCoinInfo, ShieldedCoinInfo, SCALE_FACTOR, admins, stakePoolStatus, 
+     CustomStructs_StakePoolStatus, stAssetCoinColor, Admin_delegate, Admin_setTokenColor, Admin_removeNewAdmin, 
+     Admin_addNewAdmin, stAssetDomainSeparator, delegationContractAddress, superAdmin
+};
+
+/** Initialize the contract with admin specified parameters */
+constructor(
+     initialNonce: Bytes<32>, 
+     initValidAssetCoinType: Bytes<32>, 
+     initMintDomain: Bytes<32>,
+     initDelegationContractAddress: Bytes<32>,
+     initScaleFactor: Uint<32>
+     ) {
+     nonce = disclose(initialNonce);
+     validAssetCoinType = disclose(initValidAssetCoinType);
+     mintCounter.increment(1);
+     stAssetDomainSeparator = disclose(initMintDomain);
+     SCALE_FACTOR = disclose(initScaleFactor); // Specifies the scale factor based on coin type (e.g 1ETH = 1E18, tDUST = 1E6)
+     superAdmin = ownPublicKey().bytes;
+     delegationContractAddress = disclose(initDelegationContractAddress);
+}
+
+/** STAKER FUNCTIONALITIES */
+export circuit stake(stakeCoin: ShieldedCoinInfo): []{
+     const disclosedCoin = disclose(stakeCoin);
+     const userPk = ownPublicKey().bytes;
+     const stakerId = Utils_generateStakerId(disclose(Utils_secreteKey()));
+     assert (disclosedCoin.value > 0, "Insufficient Funds provide for staking");
+     /** Mint token to the user */ 
+     const amountMintable = Utils_calculateMintCapacity(disclosedCoin.value);
+     const mintCoinColor = Utils_mintNewToken(amountMintable);
+
+     stAssetCoinColor = mintCoinColor;
+     
+     /** Handle funds sent to contract */
+     Utils_recieveAndAddCoinToTvl(disclosedCoin);
+     // /** If user already has a stake position, then update their stake info */
+     if(stakings.member(userPk)){
+          const stake = stakings.lookup(userPk);
+          assert (stakerId == stake.staker_id, "Can not add to stake: You are not the oowner");
+          const privateState = disclose(Utils_getStakePrivateState());
+          const stakeHash = Utils_generatePrivateStateHash(privateState, userPk);
+          assert (stakeHash == stake.stake_hash, "Can not add to stake: You are not the owner");
+
+          const updatedPrivatState = CustomStructs_StakePrivateState {
+               ...privateState,
+               deposit_amount: privateState.deposit_amount + disclosedCoin.value as Uint<64>,
+               stAssets_minted: privateState.stAssets_minted + amountMintable as Uint<64>
+          };
+          /** Update staker state onchain & offchain */
+          Utils_updateStakePrivateState(updatedPrivatState);
+
+          const newStakeHash = Utils_generatePrivateStateHash(updatedPrivatState, userPk);
+          stakings.insert(userPk, CustomStructs_Stake {
+               ...stake,
+               stake_hash: newStakeHash,
+               status: CustomStructs_StakeStatus.open
+          });
+     }else{
+          const newPrivateState = CustomStructs_StakePrivateState {
+               ...default<CustomStructs_StakePrivateState>,
+               deposit_amount: disclosedCoin.value as Uint<64>,
+               stAssets_minted: amountMintable as Uint<64>
+          };
+          
+          const newStakeHash = Utils_generatePrivateStateHash(newPrivateState, userPk);
+          
+          const newStake = CustomStructs_Stake {
+               ...default<CustomStructs_Stake>,
+               staker_id: stakerId,
+               stake_hash: newStakeHash,
+               created_at: disclose(Utils_getCurrentTime())
+          };
+
+          stakings.insert(userPk, newStake);
+          /** Update staker's private state */
+          Utils_updateStakePrivateState(newPrivateState);
+     }
+}
+
+export circuit redeem(mintedCoin: ShieldedCoinInfo): []{
+     /** Ensure that protocolTVL plus delegation reward is available for redemption */
+     assert (stakePoolStatus == CustomStructs_StakePoolStatus.available, "Delegation has already proceeded");
+     const disclosedCoin = disclose(mintedCoin);
+     const userPk = ownPublicKey().bytes;
+     const stakerId = Utils_generateStakerId(disclose(Utils_secreteKey()));
+     assert (stakings.member(userPk), "You do not have any stakes in the pool");
+     const stake = stakings.lookup(userPk);
+     assert (stake.status == CustomStructs_StakeStatus.open, "Delegation has already proceeded");
+     assert (stakerId == stake.staker_id, "Can not add to stake: You are not the owner");
+
+     const privateState = disclose(Utils_getStakePrivateState());
+     
+     /* Retrieves user's private state and compares minted stAsset amount and coin type with the provided coin info */
+     assert(privateState.stAssets_minted == disclosedCoin.value, "Please provide the accurate value for stAsset to redeem");
+     assert(disclosedCoin.color == stAssetCoinColor, "Invalid Token Type: please provide valid type for stAsset");
+     assert (stake.status == CustomStructs_StakeStatus.open, "Already reemed stake for specified position");
+     
+     /* Reconfirms staked info in the user's private state incase of fraud */
+     const stakeHash = Utils_generatePrivateStateHash(privateState, userPk);
+     assert (stakeHash == stake.stake_hash, "Can not add to stake: You are not the owner");
+     
+     /** Determines redeemable asset balance */
+     const exchangeRate = Utils_ScaledDivisionFunction((protocolTVL.value * SCALE_FACTOR) as Uint<64>, totalAssetMinted as Uint<64>);
+     const redeemableAsset = Utils_ScaledDivisionFunction((privateState.stAssets_minted * exchangeRate) as Uint<64>, SCALE_FACTOR);
+     
+     /** Burns the returned stAssets */
+     Utils_burnReturnedstAsset(disclosedCoin);
+
+     /** Return fund plus rewards to the staker */
+     Utils_sendAndManageChange(redeemableAsset, ownPublicKey());
+     Utils_updateStakePrivateState(CustomStructs_StakePrivateState{
+          ...privateState,
+          deposit_amount: 0,
+          redeemable: 0,
+     });
+
+     const updatedStake = CustomStructs_Stake {
+          ...stake,
+          status: CustomStructs_StakeStatus.closed
+     };
+
+     stakings.insert(userPk, updatedStake);
+}
+
+
+
+/** DELEGATOR FUNCTIONALITIES */
+export circuit recieveDelegateReward(coin: ShieldedCoinInfo): []{
+     const disclosedCoin = disclose(coin);
+     /** Recieve coin deposit from the third party contract */
+     Utils_recieveAndAddCoinToTvl(disclosedCoin);
+     totalRewardsAccrued = (totalRewardsAccrued as Uint<64>) + disclosedCoin.value as Uint<64>;
+     /** Change pool status to enable withdrawal */
+     stakePoolStatus = CustomStructs_StakePoolStatus.available; 
+}
+
+

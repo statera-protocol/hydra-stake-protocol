@@ -1,0 +1,133 @@
+pragma language_version >= 0.20.0;
+import CompactStandardLibrary;
+
+enum StakeStatus { active, unstaked };
+
+
+export struct Stake {
+  amount: Uint<64>,
+  lock_until_epoch: Uint<64>,
+  encAddress: Bytes<32>,
+  status: StakeStatus,
+  mt_index: Uint<64>
+};
+
+/* @ledger stakes store commit of private stake position */
+export ledger stakes: MerkleTree<32, Bytes<32>>;
+/* @ledger adminSignature store the signature of the caller */
+export sealed ledger adminSignature: Bytes<32>;
+/* @ledger EPOCH_DURATION defines the duration before an apoch elapses */
+export sealed ledger EPOCH_DURATION: Uint<32>;
+/* @ledger START_TIME defines the start of epoch from deployment date */
+export ledger START_TIME: Uint<64>;
+/* @ledger currentEpoch tracks the current epoch */
+export ledger currentEpoch: Field;
+
+
+witness secretKey(): Bytes<32>;
+witness getCurrentEpoch(): [Field, Boolean];
+witness verifyStakeCommit(comiitHash: Bytes<32>, mtIndex: Uint<64>): MerkleTreePath<100, Bytes<32>>;
+witness getStakeMetadata(encAddress: Bytes<32>): Maybe<Stake>;
+witness updateStakeMetadata(encAddress: Bytes<32>, updatedStake: Stake): [];
+witness getFirstFreeMerkleTreeIndex(): Uint<64>;
+witness getCurrentTime(): Uint<64>;
+
+constructor() {
+  adminSignature = deriveCallerSignature(ownPublicKey().bytes);
+  EPOCH_DURATION = 86400000;
+  START_TIME = disclose(getCurrentTime());
+}
+
+circuit deriveCallerSignature(encPk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([
+    pad(32, "hydra:stake:caller"),
+    disclose(secretKey()), encPk
+  ]);
+}
+
+export circuit stake(
+  amount_: Uint<64>,
+  lock_until_epoch: Uint<64>,
+  encAddress_: Bytes<32>,
+): Boolean {
+    const amount = disclose(amount_);
+    const encAddress = disclose(encAddress_);
+    const duration = disclose(lock_until_epoch);
+    const prevStake = disclose(getStakeMetadata(encAddress));
+    const firstFreeMtIndex = disclose(getFirstFreeMerkleTreeIndex());
+
+    const callerSignature = deriveCallerSignature(ownPublicKey().bytes);
+    assert (adminSignature == callerSignature, "Unauthorized");
+
+    if(prevStake.is_some){
+      const prevCommitHash = persistentCommit<Stake>(prevStake.value, kernel.self().bytes);
+      const path = disclose(verifyStakeCommit(prevCommitHash, prevStake.value.mt_index));
+
+      assert (stakes.checkRoot(merkleTreePathRoot<100, Bytes<32>>(path)),
+        "You dont have a stake position"
+      );
+
+      const updatedStake = Stake {
+        ...prevStake.value,
+        amount: amount,
+        lock_until_epoch: duration,
+        mt_index: firstFreeMtIndex
+      };
+
+      const updatedCommitHash = persistentCommit<Stake>(updatedStake, kernel.self().bytes);
+      stakes.insertIndexDefault(prevStake.value.mt_index);
+      stakes.insert(updatedCommitHash);
+      updateStakeMetadata(encAddress, updatedStake);
+    }else {
+      const newStake = Stake {
+        ...default<Stake>,
+        amount: amount,
+        encAddress: encAddress,
+        lock_until_epoch: duration,
+        mt_index: firstFreeMtIndex
+      };
+
+      const newCommitHash = persistentCommit<Stake>(newStake, kernel.self().bytes);
+      stakes.insert(newCommitHash);
+      updateStakeMetadata(encAddress, newStake);
+    }
+
+  const [newCurrentEpoch, isNewEpoch] = disclose(getCurrentEpoch());
+
+  /* Return boolean validating if current epoch has ended  */
+  return isNewEpoch;
+}
+
+export circuit claim( encAddress_: Bytes<32> ): Boolean{
+  const encAddress = disclose(encAddress_);
+
+  const callerSignature = deriveCallerSignature(ownPublicKey().bytes);
+  assert (adminSignature == callerSignature, "Unauthorized");
+
+  const prevStake = disclose(getStakeMetadata(encAddress));
+  assert (prevStake.is_some, "You have no stake position");
+
+  const prevCommitHash = persistentCommit<Stake>(prevStake.value, kernel.self().bytes);
+  const path = disclose(verifyStakeCommit(prevCommitHash, prevStake.value.mt_index));
+
+  assert (stakes.checkRoot(merkleTreePathRoot<100, Bytes<32>>(path)),
+    "You dont have a stake position"
+  );
+
+  assert (currentEpoch as Uint<64> >= prevStake.value.lock_until_epoch, "Cannot claim outside lock period");
+
+  const updatedStake = Stake {
+    ...prevStake.value,
+    status: StakeStatus.unstaked
+  };
+
+  const newCommitHash = persistentCommit<Stake>(updatedStake, kernel.self().bytes);
+  stakes.insertIndexDefault(prevStake.value.mt_index);
+  stakes.insert(newCommitHash);
+  updateStakeMetadata(encAddress, updatedStake);
+
+  const [newCurrentEpoch, isNewEpoch] = disclose(getCurrentEpoch());
+
+  /* Return boolean validating if current epoch has ended  */
+  return isNewEpoch;
+}
